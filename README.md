@@ -1,71 +1,120 @@
-# BeikeSchedule 贝壳课表
+# BeikeSchedulePro · 贝壳课表
 
-北京科技大学（USTB）课表 App：WebView 登录[本研一体化教务系统](https://byyt.ustb.edu.cn)一键导入课表与成绩，本地周视图展示，上课与考前提醒。
+**面向北京科技大学（USTB）学生的 Android 课表与教务助手。**
 
-## 功能
+从教务系统导入课表和成绩，在手机上查看每周课程、考试安排、个人日程与空闲教室。
 
-**课表**
-- **教务一键导入**：内置 WebView 完成统一身份认证登录（App 不接触学号密码），自动抓取学期课表 JSON，预览确认后入库
-- **官方教学周日历**：导入时同步教务校历，教学周↔日期精确映射——国庆等长假周不占教学周序号（第 4 周 = 10/5，而非 9/28）；假期中自动提示并定位到假期后第一个教学周
-- **周视图课表**：按"大节"排版（1-2 节 = 第一大节 … 第 11-12 节 = 第六大节，个别 13 节加课也归入第六大节），支持滑动切周、周次下拉跳转、单双周标注、隐藏周末开关、隐藏本周不上的课开关（关闭时这些课淡化显示）、同周冲突课程并排窄列、今天实心胶囊高亮、顶栏日期+学期状态（未开学/第 N 周/假期中）
-- **课程管理**：手动增删改课程（含多时段），教务导入数据与手动课程共存；**三类课程（教务导入 / 自定义 / 示例）都可隐藏**，在「我的」→ 隐藏的课程里恢复（同时停止其上课提醒）；教务导入课只能隐藏不能删除，自定义课与示例课可直接删除；同名调课/单双周拆分行自动合并
-- **深色模式**：跟随系统 / 浅色 / 深色三态切换；浅色暖渐变 + 暗色暗渐变双主题背景
+[![Android](https://img.shields.io/badge/Android-14%2B-3DDC84?logo=android&logoColor=white)](https://github.com/study-233/BeikeSchedulePro/releases)
+[![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white)](app/build.gradle.kts)
+[![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)](app/src/main/java/com/caeamer/beikeschedule/ui)
 
-**教务（无课教室 | 日程 | 成绩 | 考试）**
-- **无课教室**：按楼栋查看**今天**各大节的空教室（教室名 + 座位数 + 空座率），教室名自然排序（1002 排在 503 之后）、当前大节自动展开、已结束的大节淡化并标"已结束"、顶部交代"今天几号 · 数据何时更新"、下拉刷新。数据来自**贝壳教学平台**（`ustb.smartclass.cn`），无需登录教务账号，请求里不含学号/姓名
-- **日程**：个人待办日程，支持**每天重复 / 每周固定几天 / 一次性**三种模式；按日期分组展示（今天→明天→未来两周），今日已过事项淡化、每日打卡（次日自动复活）；日期用日历选择，时间（时/分双列）与提前分钟（1–120）为 iOS 风格滚轮（拖动吸附 + 点选居中）；到点前按各自提前量提醒
-- **成绩**：按学期分组的成绩单，单科排名（如 排名 5/128），点击弹详情（排名/考核方式/学分/开课学院等），不及格标红、学期组头"N 门未通过"
-- **加权成绩**：只看必修课的加权平均分，学年/学期双列筛选，可自定义排除课程
-- **GPA**：本地 4.0 制计算（90-100=4.0 / 85-89=3.7 / 80-84=3.4 / 75-79=3.0 / 70-74=2.4 / 65-69=2.0 / 60-64=1.0，补考/重修覆盖正考）
-- **学分修读进度**：毕业总进度条（已修/要求）+ 17 类课程性质的要求 vs 已完成进度条，口径与教务网一致
-- **成绩隐私**：小眼睛一键隐藏/显示全部分数
-- **考试安排**：按日期分组、D-N 倒计时、座位号、考点展示
+[下载与发布](https://github.com/study-233/BeikeSchedulePro/releases) · [问题反馈](https://github.com/study-233/BeikeSchedulePro/issues) · [联系维护者](mailto:mrtaoyx@gmail.com) · [开发文档](docs/TECH_DESIGN.md)
 
-**提醒**
-- **上课提醒**：每门课程块开始前 N 分钟通知（默认 15 分钟可调），精确闹钟 + 开机自动重排
-- **考前提醒**：考试前一天 20:00 与开考前 1 小时各提醒一次（含地点与座位号）
-- **日程提醒**：每个日程事项按自定义提前量提醒（1–120 分钟），随事项增删改即时重排
+> **发布状态：独立发行版 v1.0.0 准备中，尚未发布正式 APK。**
+> 首版将使用独立应用 ID，可与原版共存。请以本仓库 Releases 中实际发布的版本和附件为准。
 
-**我的**
-- 学籍信息卡（姓名/学号/学院/专业/班级），主题三态切换，检查更新，外部系统快捷入口（评教/大创），清除成绩缓存，联系开发者
+## 能做什么
 
-## 下载
+| 功能 | 说明 |
+| --- | --- |
+| 课表导入 | 内置 WebView 登录本研一体化教务系统，导入前预览确认 |
+| 每周课表 | 同步教学周日历，支持滑动切周、单双周、冲突课程并排显示 |
+| 课程管理 | 手动添加和编辑课程，隐藏或恢复课程，按需隐藏周末与非本周课程 |
+| 成绩与学业 | 按学期查看成绩、排名、加权平均分、GPA 和学分修读进度 |
+| 考试安排 | 查看考试倒计时、时间、考点和座位号 |
+| 个人日程 | 一次性、每天或每周重复待办，支持每日打卡和提前提醒 |
+| 空闲教室 | 按教学楼查看今天各大节空教室、座位数及空座率 |
+| 消息提醒 | 上课、考前与个人日程提醒，支持开机后重新安排提醒 |
+| 个性化 | 跟随系统、浅色和深色主题，成绩隐藏与课程显示设置 |
 
-[Releases](https://github.com/coderirse/BeikeSchedule/releases) 页面下载最新 APK（release 签名，可直接覆盖安装升级；v1.0.14 及更早版本因包名变更需卸载重装）。
+<details>
+<summary>展开查看功能细节</summary>
 
-## 技术栈
+- **教学周**：根据教务校历映射教学周与日期，处理不计入教学周的假期；假期中提示并定位到后续教学周。
+- **课表显示**：按大节排版，支持周次下拉跳转、今天高亮；可淡化或隐藏本周不上的课程。
+- **课程管理**：教务导入、自定义和示例课程均可隐藏，隐藏后停止上课提醒；教务导入课程仅支持隐藏，自定义和示例课程可删除。同名调课与单双周拆分行自动合并。
+- **成绩分析**：加权平均分按必修课计算，可按学年或学期筛选并自定义排除课程；GPA 在本地按项目内置 4.0 制计算，补考和重修覆盖正考。成绩默认隐藏，可通过小眼睛按钮显示。
+- **学分进度**：展示毕业总进度和课程性质分类进度；成绩详情包含接口提供的排名、考核方式、学分与开课学院等信息。
+- **日程**：按日期分组，已过事项淡化；每日打卡次日重置，支持提前 1–120 分钟提醒。
+- **考试提醒**：考试前一天 20:00 和开考前 1 小时提醒；上课默认提前 15 分钟提醒，可自行调整。
+- **空闲教室**：无需登录教务账号，支持下拉刷新，显示数据更新时间；当前大节自动展开，已结束时段标注提示。
+- **我的**：查看学籍信息、检查更新、打开外部教学系统、清除成绩缓存及退出教务登录。
 
-- Kotlin + Jetpack Compose（Material 3）
-- Room（课程 / 节次时间 / 成绩 / 考试 / 日程）+ DataStore（学期配置 / 教学周日历 / 提醒 / 主题 / 隐私开关）
-- AlarmManager（上课 / 考试 / 日程提醒调度）
-- 教务适配层：WebView 注入 JS 复用登录会话，直接调教务结构化 JSON 接口（无需解析 HTML）
+</details>
 
-### 教务接口要点
+## 下载与使用
 
-- 课表：`/xszykb/queryxszykbzong`（学期总课表，含 32 位周次位图）、`/component/queryKbjg`（节次时间）
-- 成绩：`/cjgl/grcjcx/grcjcx`（成绩+排名/考核方式，JSON POST）、`/cjgl/grcjcx/getgpa`（GPA 概览）
-- 学业进度：`/cjgl/cjzhtjcx/cjcx/queryXflbyq`（学分类别要求）、`queryBxkqk`（毕业总进度）
-- 考试：`/kscxtj/queryXsksByxhList`（pxn/pxq/ppylx 参数带 p 前缀）
-- 校历：`/Xiaoli/queryMonthList`（全量教学周↔日期映射，需 `RoleCode` 头），失败时逐周 `/component/queryRlZcSj` 兜底
-- 无课教室（**贝壳教学平台**，与教务系统相互独立）：`/general/api/open/building/listBuildings`（楼栋）、`/general/api/open/teachingCycle/listNodeTypes`（节次类型）、`/general/api/classroom/freeClassRooms`（POST，`nodeId` 传空串=全部时段）。每个请求都要带 `csrkToken` 签名：密钥在 `/config.json` 的加密 `domainConfig` 里（AES-256-CBC），时间戳必须用服务器时间——直接取 `/config.json` 的 HTTP `Date` 响应头，详见 `docs/JWXT_API.md` 附录
-- 登录页是 PC 布局且其 meta viewport 会覆盖 WebView 宽视口设置，注入脚本改写 `width=1440` 并修补 `100vh` 高度坍缩（详见 `JwWebView.kt` 注释）
-- 全量接口参考：[docs/JWXT_API.md](docs/JWXT_API.md)（后续开发勿再扒站）
+1. 正式发布后，从 [本仓库 Releases](https://github.com/study-233/BeikeSchedulePro/releases) 下载签名 APK；最低支持 **Android 14（API 34）**。
+2. 打开应用，在内置页面登录 [北京科技大学本研一体化教务系统](https://byyt.ustb.edu.cn)，预览并导入课表。
+3. 按需导入成绩和考试安排，设置个人日程，并开启需要的通知权限与提醒选项。
 
-## 构建
+### 独立发行版说明
 
-```bash
-./gradlew assembleRelease    # 需要 keystore.properties（签名配置，未入库）
-./gradlew testDebugUnitTest  # 解析器/周次逻辑单测（fixture 为真实接口样本，见 docs/samples/）
+| 项目 | 首版规划 |
+| --- | --- |
+| 应用名称 | 贝壳课表 |
+| 版本名 / 内部版本码 | 1.0.0 / 1 |
+| 应用 ID | `io.github.study233.beikeschedulepro` |
+| APK 命名 | `BeikeSchedulePro-v1.0.0.apk` |
+| 维护者 | [study-233](https://github.com/study-233) |
+
+独立版与原版的数据、偏好和登录会话相互独立，可同时安装。首次使用需要重新登录、导入课程与成绩，并重新设置个人日程和提醒；不会自动迁移原版数据。后续本发行版升级需保持相同应用 ID 和签名，并递增内部版本码。
+
+## 隐私与数据
+
+- 学号和密码由你在系统 WebView 中直接输入学校认证页面，App 不读取、不存储密码。
+- 课表、成绩和个人日程保存在本机，App 不将这些数据上传到开发者服务器。
+- WebView 保存登录会话；学籍信息会随成绩抓取缓存在本机，供离线展示。可在“我的 → 退出教务登录”清除会话。
+- 空闲教室数据来自贝壳教学平台（`ustb.smartclass.cn`）。请求携带平台公开配置生成的签名参数和设备网络出口 IP，不包含学号、姓名或本机课表等个人数据。
+- 应用需要访问学校服务及 GitHub 更新接口；对应服务的可用性会影响导入、查询或更新检查。
+
+## 开发与构建
+
+项目采用单个 `app` 模块：
+
+| 层次 | 技术 |
+| --- | --- |
+| 界面 | Kotlin · Jetpack Compose · Material 3 |
+| 本地数据 | Room · DataStore |
+| 提醒 | AlarmManager · BroadcastReceiver |
+| 教务导入 | WebView 登录会话 · JavaScript 注入 · 结构化 JSON |
+| 空闲教室 | 贝壳教学平台接口 |
+
+工具链、SDK 和依赖要求以仓库配置为准，当前 Gradle daemon 请求 **Java 21**。使用项目自带的 Gradle wrapper，无需全局安装 Gradle。
+
+Windows PowerShell：
+
+```powershell
+.\gradlew.bat assembleDebug
+.\gradlew.bat testDebugUnitTest lintDebug minifyReleaseWithR8 --console=plain
 ```
 
-更多技术细节见 [docs/TECH_DESIGN.md](docs/TECH_DESIGN.md) 与 [docs/JWXT_API.md](docs/JWXT_API.md)。
+macOS / Linux：
 
-## 隐私
+```bash
+./gradlew assembleDebug
+./gradlew testDebugUnitTest lintDebug minifyReleaseWithR8 --console=plain
+```
 
-学号密码只在系统 WebView 中由本人输入给学校统一认证页面，App 不读取、不存储密码；课表/成绩/日程数据仅保存在本机，不上传云端；成绩默认隐藏展示需点小眼睛查看。登录会话由系统 WebView 保存，学号等学籍信息会随成绩抓取缓存在本机用于离线展示；如需终止会话，可在「我的」→「退出教务登录」清除。查看「无课教室」时 App 会直接访问贝壳教学平台（`ustb.smartclass.cn`）的公开接口，该请求只携带一个由平台公开配置算出的签名参数与设备网络出口 IP，不包含学号、姓名或任何本机数据。
+正式签名 APK 使用 `assembleRelease` 构建，需要维护者自己的 `keystore.properties` 和签名密钥；私人配置、密钥与 APK 不加入源码提交。以上是供开发者执行的命令，不代表当前版本已通过构建或测试。
 
-## 反馈
+### 文档与发布准备
 
-问题反馈：caeamer@163.com ｜ GitHub Issues
+- [教务与空闲教室接口参考](docs/JWXT_API.md)：集成开发前先查阅，避免重复探查学校接口。
+- [技术设计](docs/TECH_DESIGN.md)：架构与早期设计背景；历史版本描述请与当前源码对照。
+- [CI 配置](.github/workflows/ci.yml)：自动检查任务的来源。
+- 本地已准备发布 skill `$beikeschedule-release`（`.agents/skills/beikeschedule-release/SKILL.md`）及首版说明（`docs/releases/v1.0.0.md`），将随相关源码同步到仓库。默认用于准备版本配置、中文发布说明与发布步骤，实际构建、签名和发布需单独执行。
+
+## 反馈与联系
+
+- 维护者：[study-233](https://github.com/study-233)
+- 邮箱：[mrtaoyx@gmail.com](mailto:mrtaoyx@gmail.com)
+- 问题与建议：[GitHub Issues](https://github.com/study-233/BeikeSchedulePro/issues)
+
+反馈时请附上应用版本、Android 版本、问题描述和复现步骤；截图或日志中请遮挡学号、姓名和登录信息，不要发送密码或会话凭证。
+
+## 项目来源
+
+本项目基于 [coderirse/BeikeSchedule](https://github.com/coderirse/BeikeSchedule)，原作者为 caeamer。BeikeSchedulePro 由 study-233 维护，以下保留原项目版权声明：
 
 © 2026 caeamer. All rights reserved.
