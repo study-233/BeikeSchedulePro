@@ -10,8 +10,8 @@
 
 [下载与发布](https://github.com/study-233/BeikeSchedulePro/releases) · [问题反馈](https://github.com/study-233/BeikeSchedulePro/issues) · [联系维护者](mailto:mrtaoyx@gmail.com) · [开发文档](docs/TECH_DESIGN.md)
 
-> **发布状态：独立发行版 v1.0.0 准备中，尚未发布正式 APK。**
-> 首版将使用独立应用 ID，可与原版共存。请以本仓库 Releases 中实际发布的版本和附件为准。
+> **发布状态：独立发行版 v1.0.0 已发布。**
+> 首版使用独立应用 ID，可与原版共存。请从本仓库 Releases 下载签名 APK。
 
 ## 能做什么
 
@@ -19,7 +19,7 @@
 | --- | --- |
 | 课表导入 | 内置 WebView 登录本研一体化教务系统，导入前预览确认 |
 | 每周课表 | 同步教学周日历，支持滑动切周、单双周、冲突课程并排显示 |
-| 桌面课表 | 2×2 今日课程卡片，显示正在上和接下来的课程；源码已加入，待构建与真机验证 |
+| 桌面课表 | 2×2 今日课程卡片，显示正在上和接下来的课程；仍待真机验收 |
 | 课程管理 | 手动添加和编辑课程，隐藏或恢复课程，按需隐藏周末与非本周课程 |
 | 成绩与学业 | 按学期查看成绩、排名、加权平均分、GPA 和学分修读进度 |
 | 考试安排 | 查看考试倒计时、时间、考点和座位号 |
@@ -46,13 +46,13 @@
 
 ## 下载与使用
 
-1. 正式发布后，从 [本仓库 Releases](https://github.com/study-233/BeikeSchedulePro/releases) 下载签名 APK；最低支持 **Android 14（API 34）**。
+1. 从 [本仓库 Releases](https://github.com/study-233/BeikeSchedulePro/releases) 下载签名 APK；最低支持 **Android 14（API 34）**。
 2. 打开应用，在内置页面登录 [北京科技大学本研一体化教务系统](https://byyt.ustb.edu.cn)，预览并导入课表。
 3. 按需导入成绩和考试安排，设置个人日程，并开启需要的通知权限与提醒选项。
 
 ### 独立发行版说明
 
-| 项目 | 首版规划 |
+| 项目 | 首版 |
 | --- | --- |
 | 应用名称 | 贝壳课表 |
 | 版本名 / 内部版本码 | 1.0.0 / 1 |
@@ -100,15 +100,15 @@ macOS / Linux：
 ./gradlew testDebugUnitTest lintDebug minifyReleaseWithR8 --console=plain
 ```
 
-正式签名 APK 使用 `assembleRelease` 构建，需要维护者自己的 `keystore.properties` 和签名密钥；私人配置、密钥与 APK 不加入源码提交。以上是供开发者执行的命令，不代表当前版本已通过构建或测试。
+正式签名 APK 使用 `assembleRelease` 构建，需要维护者自己的 `keystore.properties` 和签名密钥；私人配置、密钥与 APK 不加入源码提交。以上命令供开发者执行；自动检查与设备验收状态以首版发布说明为准。
 
-### 文档与发布准备
+### 文档与发布
 
 - [教务与空闲教室接口参考](docs/JWXT_API.md)：集成开发前先查阅，避免重复探查学校接口。
 - [技术设计](docs/TECH_DESIGN.md)：架构与早期设计背景；历史版本描述请与当前源码对照。
 - [桌面课表 Widget](docs/WIDGET_DESIGN.md)：布局、数据流、后台调度限制与手动验收步骤。
 - [CI 配置](.github/workflows/ci.yml)：自动检查任务的来源。
-- 本地已准备发布 skill `$beikeschedule-release`（`.agents/skills/beikeschedule-release/SKILL.md`）及首版说明（`docs/releases/v1.0.0.md`），将随相关源码同步到仓库。默认用于准备版本配置、中文发布说明与发布步骤，实际构建、签名和发布需单独执行。
+- 仓库提供发布 skill `$beikeschedule-release`（`.agents/skills/beikeschedule-release/SKILL.md`）及首版说明（`docs/releases/v1.0.0.md`），用于准备版本配置、中文发布说明与发布步骤。
 
 ## 反馈与联系
 
