@@ -11,6 +11,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.datastore.preferences.core.Preferences
+import com.caeamer.beikeschedule.model.BackgroundScale
+import com.caeamer.beikeschedule.model.ScheduleAppearance
 
 /**
  * 配置存储。corruptionHandler 必加：settings.preferences_pb 一旦损坏（写中断/存储写满/恢复异常），
@@ -56,6 +60,11 @@ class SettingsStore(private val context: Context) {
     enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
     private object Keys {
+        val SCHEDULE_FONT = intPreferencesKey("schedule_font_percent")
+        val SCHEDULE_BACKGROUND = stringPreferencesKey("schedule_background_file")
+        val SCHEDULE_SCALE = stringPreferencesKey("schedule_background_scale")
+        val SCHEDULE_OVERLAY = intPreferencesKey("schedule_background_overlay")
+        val SCHEDULE_BLUR = intPreferencesKey("schedule_background_blur")
         val XN = stringPreferencesKey("semester_xn")
         val XQ = stringPreferencesKey("semester_xq")
         val NAME = stringPreferencesKey("semester_name")
@@ -86,6 +95,30 @@ class SettingsStore(private val context: Context) {
         val TODO_REMINDER_CODES = stringPreferencesKey("todo_reminder_codes")
         val FREE_ROOM_BUILDING = stringPreferencesKey("free_room_building")
         val FREE_ROOM_TAB_INDEX = intPreferencesKey("free_room_tab_index")
+    }
+
+    private fun readAppearance(p: Preferences) = ScheduleAppearance(
+        fontPercent = p[Keys.SCHEDULE_FONT] ?: 100,
+        backgroundFile = p[Keys.SCHEDULE_BACKGROUND].orEmpty(),
+        imageScale = BackgroundScale.entries.firstOrNull { it.name == p[Keys.SCHEDULE_SCALE] }
+            ?: BackgroundScale.CROP,
+        overlayPercent = p[Keys.SCHEDULE_OVERLAY] ?: 30,
+        blurDp = p[Keys.SCHEDULE_BLUR] ?: 0,
+    ).normalized()
+
+    val scheduleAppearance: Flow<ScheduleAppearance> = context.dataStore.data
+        .map(::readAppearance).distinctUntilChanged()
+
+    /** 在同一次 DataStore 事务中读取和修改，避免字号写入覆盖正在更换的图片。 */
+    suspend fun updateScheduleAppearance(transform: (ScheduleAppearance) -> ScheduleAppearance) {
+        context.dataStore.edit { p ->
+            val value = transform(readAppearance(p)).normalized()
+            p[Keys.SCHEDULE_FONT] = value.fontPercent
+            p[Keys.SCHEDULE_BACKGROUND] = value.backgroundFile
+            p[Keys.SCHEDULE_SCALE] = value.imageScale.name
+            p[Keys.SCHEDULE_OVERLAY] = value.overlayPercent
+            p[Keys.SCHEDULE_BLUR] = value.blurDp
+        }
     }
 
     val semester: Flow<SemesterConfig> = context.dataStore.data.map { p ->

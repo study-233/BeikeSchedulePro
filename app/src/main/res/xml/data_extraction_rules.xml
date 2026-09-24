@@ -10,6 +10,7 @@
         <exclude domain="database" path="beike_schedule.db-wal" />
         <exclude domain="database" path="beike_schedule.db-shm" />
         <exclude domain="file" path="datastore/" />
+        <exclude domain="file" path="schedule_backgrounds/" />
         <exclude domain="root" path="app_webview/" />
     </cloud-backup>
     <device-transfer>

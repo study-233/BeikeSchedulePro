@@ -12,6 +12,9 @@ interface CourseDao {
     @Query("SELECT * FROM course ORDER BY dayOfWeek, startSection")
     fun observeAll(): Flow<List<CourseEntity>>
 
+    @Query("SELECT * FROM course ORDER BY dayOfWeek, startSection, endSection, id")
+    suspend fun getAll(): List<CourseEntity>
+
     @Query("SELECT * FROM course WHERE source = :source")
     suspend fun getBySource(source: Int): List<CourseEntity>
 

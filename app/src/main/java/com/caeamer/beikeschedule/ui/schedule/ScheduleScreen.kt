@@ -6,6 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -75,6 +78,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.caeamer.beikeschedule.data.local.CourseEntity
 import com.caeamer.beikeschedule.data.local.SectionTimeEntity
 import com.caeamer.beikeschedule.data.pref.SettingsStore
+import com.caeamer.beikeschedule.model.CourseCardLayout
+import com.caeamer.beikeschedule.model.ScheduleAppearance
+import com.caeamer.beikeschedule.ui.settings.ScheduleAppearanceViewModel
+import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.roundToInt
 import com.caeamer.beikeschedule.model.CourseMerger
 import com.caeamer.beikeschedule.model.NextClass
 import com.caeamer.beikeschedule.model.SectionMap
@@ -104,7 +112,7 @@ private val WEEKDAY_NAMES = listOf("一", "二", "三", "四", "五", "六", "�
  */
 private const val SCROLLABLE_SHEET_MIN_ITEMS = 5
 
-/** 网格底部为 FAB 预留的净空（40dp 按钮 + 16dp 边距，见 WeekGrid 注释）。 */
+/** 网格底部可滚动的 FAB 避让空间（40dp 按钮 + 16dp 边距）。 */
 private val FAB_CLEARANCE = 56.dp
 
 /** 日期所属教学周（严格口径：开学前/假期跳周/学期后返回 null），与提醒排期同一套判定。 */
@@ -119,6 +127,12 @@ fun ScheduleScreen(
 ) {
     // withLifecycle：退到后台停止收集（WhileSubscribed 才能在后台真正停流）
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val appearanceViewModel: ScheduleAppearanceViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val savedAppearance by appearanceViewModel.appearance.collectAsStateWithLifecycle()
+    val appearance = savedAppearance ?: ScheduleAppearance()
+    val chromeColor = if (appearance.backgroundFile.isNotEmpty()) {
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+    } else Color.Transparent
     val reminderEnabled by viewModel.reminderEnabled.collectAsStateWithLifecycle()
     val reminderMinutes by viewModel.reminderMinutes.collectAsStateWithLifecycle()
     val hideWeekend by viewModel.hideWeekend.collectAsStateWithLifecycle()
@@ -221,7 +235,7 @@ fun ScheduleScreen(
             // 自定义矮顶栏（替代 TopAppBar 64dp 大留白），内容单行紧凑排列
             // 外层 Scaffold 已不消费状态栏 inset（contentWindowInsets=0），故这里自行 statusBarsPadding
             // 透明，透出 MainActivity 的整屏渐变背景
-            Surface(color = Color.Transparent) {
+            Surface(color = chromeColor) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -231,8 +245,15 @@ fun ScheduleScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // 学期名（下挂今天日期与周次状态）可点击 → 学期设置
-                    TextButton(onClick = { showSettings = true }) {
-                        Column(horizontalAlignment = Alignment.Start) {
+                    // 标题只占按钮以外的剩余宽度，避免「回到本周」出现时挤压末尾的导入按钮。
+                    TextButton(
+                        onClick = { showSettings = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.Start,
+                        ) {
                             Text(
                                 text = state.semester.name.ifBlank { "贝壳课表" },
                                 style = MaterialTheme.typography.titleMedium,
@@ -287,7 +308,6 @@ fun ScheduleScreen(
                             )
                         }
                     }
-                    Spacer(Modifier.weight(1f))
                     if (state.currentWeek != null && state.selectedWeek != state.currentWeek) {
                         IconButton(onClick = {
                             scope.launch { pagerState.animateScrollToPage(state.currentWeek!! - 1) }
@@ -326,12 +346,14 @@ fun ScheduleScreen(
                     },
                 )
             } else {
-                DateRow(
-                    week = state.selectedWeek,
-                    semester = state.semester,
-                    today = now.toLocalDate(),
-                    days = visibleDays,
-                )
+                Surface(color = chromeColor) {
+                    DateRow(
+                        week = state.selectedWeek,
+                        semester = state.semester,
+                        today = now.toLocalDate(),
+                        days = visibleDays,
+                    )
+                }
                 if (state.inHoliday && state.nextWeekMonday != null) {
                     Surface(color = MaterialTheme.colorScheme.tertiaryContainer) {
                         Text(
@@ -355,6 +377,7 @@ fun ScheduleScreen(
                         // 只在用户正看"今天所在教学周"时标记，翻到其他周不误导
                         nextClassId = nextClassId.takeIf { page + 1 == teachingWeekOf(state.semester, now.toLocalDate()) },
                         hideInactiveCourses = hideInactiveCourses,
+                        appearance = appearance,
                         onSlotLongPress = { day, big -> pendingSlot = day to big },
                         onSlotClick = { day, big ->
                             if (pendingSlot == day to big) {
@@ -560,6 +583,7 @@ private fun WeekGrid(
     nextClassId: Long?,
     /** 开启后不再显示"本周暂时不上"的淡化课（设置页开关）。 */
     hideInactiveCourses: Boolean,
+    appearance: ScheduleAppearance,
     onSlotLongPress: (day: Int, big: Int) -> Unit,
     onSlotClick: (day: Int, big: Int) -> Unit,
     onCourseClick: (CourseEntity) -> Unit,
@@ -567,102 +591,131 @@ private fun WeekGrid(
     val timeMap = remember(sectionTimes) { sectionTimes.associateBy { it.section } }
     // 同名同段多行（教务单周调课/单双周拆分）先合并成一张卡，再进冲突聚类
     val mergedCourses = remember(courses) { CourseMerger.mergeSameSlot(courses) }
-    // 底部留出 FAB 的净空：网格不可滚动，FAB 压住的最后一天最后一个大节是**看不回来**的。
-    Row(Modifier.fillMaxSize().padding(bottom = FAB_CLEARANCE)) {
-        // 节次列
-        // 节次列：按 6 大节显示（一~六 + 起止时间），行高按小节数加权
-        Column(Modifier.width(SECTION_COL_WIDTH).fillMaxHeight()) {
-            SectionMap.BIG_SECTIONS.forEachIndexed { index, range ->
+    val dayLayouts = remember(mergedCourses, days, week, hideInactiveCourses) {
+        days.associateWith { WeekLayout.layoutDay(mergedCourses, it, week, hideInactiveCourses) }
+    }
+    val visibleCourses = remember(dayLayouts) {
+        dayLayouts.values.flatMap { it.clusters.flatten() + it.inactives }
+    }
+    val density = LocalDensity.current
+    val minimumUnit = with(density) {
+        CourseCardLayout.minimumUnitHeight(
+            visibleCourses,
+            (13 * appearance.fontScale).sp.toDp().value,
+            (11 * appearance.fontScale).sp.toDp().value,
+        ).dp
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val gridHeight = maxOf(
+            (maxHeight - FAB_CLEARANCE).coerceAtLeast(0.dp),
+            minimumUnit * SectionMap.TOTAL_SMALL_SECTIONS,
+        )
+        // 显式有限高度供课程绝对定位使用；日期栏在滚动容器之外，背景由宿主固定铺底。
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Row(Modifier.fillMaxWidth().height(gridHeight)) {
+                // 节次列
+                // 节次列：按 6 大节显示（一~六 + 起止时间），行高按小节数加权
                 Column(
-                    modifier = Modifier.weight(range.count().toFloat()).fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                    Modifier.width(SECTION_COL_WIDTH).fillMaxHeight().background(
+                        if (appearance.backgroundFile.isNotEmpty()) MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                        else Color.Transparent,
+                    ),
                 ) {
-                    Text(SectionMap.BIG_NAMES[index], fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                    timeMap[range.first]?.let {
-                        Text(it.startTime, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    timeMap[range.last]?.let {
-                        Text(it.endTime, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    SectionMap.BIG_SECTIONS.forEachIndexed { index, range ->
+                        Column(
+                            modifier = Modifier.weight(range.count().toFloat()).fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text(SectionMap.BIG_NAMES[index], fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            timeMap[range.first]?.let {
+                                Text(it.startTime, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            timeMap[range.last]?.let {
+                                Text(it.endTime, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
                 }
-            }
-        }
-        // N 天列（隐藏周末时为 5 天）
-        days.forEach { day ->
-            // 冲突簇（本周重叠 → 并排窄列）与非本周淡化课的分拣逻辑见 WeekLayout（纯函数，有单测）。
-            // 开启"隐藏本周不上的课"后 inactives 为空，网格只留本周真正要上的课。
-            val dayLayout = remember(mergedCourses, day, week, hideInactiveCourses) {
-                WeekLayout.layoutDay(mergedCourses, day, week, hideInactiveCourses)
-            }
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                // 空白格交互层（最底层）：长按出 +，点击 + 打开预填的添加课程框，点其他格取消
-                Column(Modifier.fillMaxSize()) {
-                    SectionMap.BIG_SECTIONS.forEachIndexed { big, range ->
-                        Box(
-                            modifier = Modifier
-                                .weight(range.count().toFloat())
-                                .fillMaxWidth()
-                                .combinedClickable(
-                                    onClick = { onSlotClick(day, big) },
-                                    onLongClick = { onSlotLongPress(day, big) },
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (pendingSlot == day to big) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    shape = RoundedCornerShape(20.dp),
-                                    shadowElevation = 2.dp,
+                // N 天列（隐藏周末时为 5 天）
+                days.forEach { day ->
+                    // 冲突簇（本周重叠 → 并排窄列）与非本周淡化课的分拣逻辑见 WeekLayout（纯函数，有单测）。
+                    // 开启"隐藏本周不上的课"后 inactives 为空，网格只留本周真正要上的课。
+                    val dayLayout = dayLayouts.getValue(day)
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        // 空白格交互层（最底层）：长按出 +，点击 + 打开预填的添加课程框，点其他格取消
+                        Column(Modifier.fillMaxSize()) {
+                            SectionMap.BIG_SECTIONS.forEachIndexed { big, range ->
+                                Box(
+                                    modifier = Modifier
+                                        .weight(range.count().toFloat())
+                                        .fillMaxWidth()
+                                        .combinedClickable(
+                                            onClick = { onSlotClick(day, big) },
+                                            onLongClick = { onSlotLongPress(day, big) },
+                                        ),
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(
-                                        Icons.Default.Add,
-                                        contentDescription = "添加课程",
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(6.dp),
-                                    )
+                                    if (pendingSlot == day to big) {
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            shape = RoundedCornerShape(20.dp),
+                                            shadowElevation = 2.dp,
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Add,
+                                                contentDescription = "添加课程",
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.padding(6.dp),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                }
-                // 大节分隔线：贴合当前背景色（浅色=白/暗色=深），避免产生突兀的"黑框/暗带"
-                Column(Modifier.fillMaxSize()) {
-                    SectionMap.BIG_SECTIONS.forEach { range ->
-                        Box(
-                            Modifier
-                                .weight(range.count().toFloat())
-                                .fillMaxWidth()
-                                .padding(vertical = 0.5.dp)
-                                .alpha(0.5f)
-                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)),
-                        )
-                    }
-                }
-                // 课程块层：冲突簇并排窄列，簇与簇、以及非本周课程各自独占整列宽
-                dayLayout.clusters.forEach { cluster ->
-                    Row(Modifier.fillMaxSize()) {
-                        cluster.forEach { course ->
-                            Box(Modifier.weight(1f).fillMaxHeight()) {
-                                CourseCard(
-                                    course = course,
-                                    active = true,
-                                    isNext = course.id == nextClassId,
-                                    onClick = { onCourseClick(course) },
+                        // 大节分隔线：贴合当前背景色（浅色=白/暗色=深），避免产生突兀的"黑框/暗带"
+                        Column(Modifier.fillMaxSize()) {
+                            SectionMap.BIG_SECTIONS.forEach { range ->
+                                Box(
+                                    Modifier
+                                        .weight(range.count().toFloat())
+                                        .fillMaxWidth()
+                                        .padding(vertical = 0.5.dp)
+                                        .alpha(0.5f)
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)),
                                 )
                             }
                         }
+                        // 课程块层：冲突簇并排窄列，簇与簇、以及非本周课程各自独占整列宽
+                        dayLayout.clusters.forEach { cluster ->
+                            Row(Modifier.fillMaxSize()) {
+                                cluster.forEach { course ->
+                                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                                        CourseCard(
+                                            course = course,
+                                            active = true,
+                                            fontScale = appearance.fontScale,
+                                            isNext = course.id == nextClassId,
+                                            onClick = { onCourseClick(course) },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        dayLayout.inactives.forEach { course ->
+                            CourseCard(
+                                course = course,
+                                active = false,
+                                fontScale = appearance.fontScale,
+                                isNext = false,
+                                onClick = { onCourseClick(course) },
+                            )
+                        }
                     }
                 }
-                dayLayout.inactives.forEach { course ->
-                    CourseCard(
-                        course = course,
-                        active = false,
-                        isNext = false,
-                        onClick = { onCourseClick(course) },
-                    )
-                }
             }
+            // 滚到最底部时，末节课程可以完整避开悬浮添加按钮。
+            Spacer(Modifier.height(FAB_CLEARANCE))
         }
     }
 }
@@ -671,6 +724,7 @@ private fun WeekGrid(
 private fun androidx.compose.foundation.layout.BoxScope.CourseCard(
     course: CourseEntity,
     active: Boolean,
+    fontScale: Float,
     /** 是否为"下一节课"（今天尚未开始的最早一节）：右上角叠加图钉徽标。 */
     isNext: Boolean,
     onClick: () -> Unit,
@@ -678,15 +732,8 @@ private fun androidx.compose.foundation.layout.BoxScope.CourseCard(
     // 本周/非本周都用课程本色：非本周整体淡化（灰底会被误认为本周有课，用户明确要求回退）
     val (bg, fg) = CourseColors.of(course.colorIndex)
     // 13 节特殊加课钳制到第 12 节区间显示（网格按 12 小节排版）
-    val clampedStart = course.startSection.coerceAtMost(SectionMap.TOTAL_SMALL_SECTIONS)
-    val clampedEnd = course.endSection.coerceAtMost(SectionMap.TOTAL_SMALL_SECTIONS)
-    val span = (clampedEnd - clampedStart + 1).coerceAtLeast(1)
-    val oddEven = WeekUtils.oddEvenLabel(course.weekBitmap)
-    val nameMaxLines = when {
-        span <= 1 -> 1
-        span == 2 -> 3
-        else -> 4
-    }
+    val clampedStart = course.startSection.coerceIn(1, SectionMap.TOTAL_SMALL_SECTIONS)
+    val span = CourseCardLayout.span(course)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -703,35 +750,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CourseCard(
                 .alpha(if (active) 1f else 0.3f)
                 .clickable(onClick = onClick),
         ) {
-            Column(Modifier.padding(3.dp)) {
-                Text(
-                    course.name,
-                    fontSize = 10.sp,
-                    lineHeight = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = fg,
-                    maxLines = nameMaxLines,
-                    overflow = TextOverflow.Ellipsis,
-                    // 图钉占右上角，课名让出右侧空间，避免被徽标压住
-                    modifier = if (isNext) Modifier.padding(end = 15.dp) else Modifier,
-                )
-                if (span >= 2 && course.location.isNotBlank()) {
-                    // 楼名+房号一行显示（"机械楼720"），省出的行高留给课名。
-                    // 剥【校区】前缀走 CourseMerger 的共享实现（通知里也是同一条规则），
-                    // 不再在卡片内每次重组内联编译 Regex。
-                    Text(
-                        CourseMerger.stripCampusPrefix(course.location),
-                        fontSize = 9.sp,
-                        lineHeight = 11.sp,
-                        color = fg.copy(alpha = 0.8f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (span >= 2 && oddEven.isNotEmpty()) {
-                    Text("[$oddEven]", fontSize = 9.sp, color = fg.copy(alpha = 0.7f))
-                }
-            }
+            CourseCardText(course, fg, fontScale, isNext)
         }
         // 下一节课图钉徽标：右上角圆形叠标，不占卡片内文字行高
         if (isNext) {
@@ -753,18 +772,19 @@ private fun androidx.compose.foundation.layout.BoxScope.CourseCard(
 }
 
 /**
- * 课程块定位：一次性测量出固定高度（span/13 父高）并放置到 (startSection-1)/13 处。
+ * 课程块定位：按小节数测量与放置；起止边界分别取整，与节次列保持对齐。
  * 不能用 fillMaxHeight+偏移的组合——fillMaxHeight 会先压缩约束，导致偏移量被等比缩小。
  */
 private fun Modifier.coursePosition(startSection: Int, span: Int): Modifier =
     this.layout { measurable, constraints ->
-        val unit = constraints.maxHeight / SectionMap.TOTAL_SMALL_SECTIONS
-        val height = (unit * span).coerceAtLeast(unit)
+        val unit = constraints.maxHeight.toFloat() / SectionMap.TOTAL_SMALL_SECTIONS
+        val top = (unit * (startSection - 1)).roundToInt()
+        val height = ((unit * (startSection - 1 + span)).roundToInt() - top).coerceAtLeast(1)
         val placeable = measurable.measure(
             constraints.copy(minHeight = height, maxHeight = height),
         )
         layout(placeable.width, placeable.height) {
-            placeable.place(0, unit * (startSection - 1))
+            placeable.place(0, top)
         }
     }
 

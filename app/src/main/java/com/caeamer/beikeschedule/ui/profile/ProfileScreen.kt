@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,13 +75,15 @@ import androidx.compose.foundation.layout.Box
 // 原先这 12 行是重复粘贴（Kotlin 只报 Duplicate import 警告，故一直被忽略）
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.caeamer.beikeschedule.AppInfo
 import com.caeamer.beikeschedule.R
 import com.caeamer.beikeschedule.data.pref.SettingsStore
 import com.caeamer.beikeschedule.import.clearJwSession
+import com.caeamer.beikeschedule.ui.settings.ScheduleAppearanceDialog
 import com.caeamer.beikeschedule.ui.settings.SettingsViewModel
 import com.caeamer.beikeschedule.ui.settings.UpdateState
 
-/** 我的 Tab：学籍信息 + 主题 / 检查更新 / GitHub / 版本号 / 清缓存 + 版权。 */
+/** 我的 Tab：学籍信息 + 主题 / 检查更新 / GitHub / 版本号 / 清缓存 + 维护者。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
@@ -95,6 +98,10 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
     var showClearCacheConfirm by remember { mutableStateOf(false) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showAppearance by rememberSaveable { mutableStateOf(false) }
+    if (showAppearance) {
+        ScheduleAppearanceDialog(onDismiss = { showAppearance = false })
+    }
 
     Scaffold(
         // 外层 Scaffold（MainActivity）已用 navigationBarsPadding 预留底部 Tab 栏高度，
@@ -226,7 +233,7 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
                 },
                 onClick = {
                     context.openExternal(
-                        Intent(Intent.ACTION_VIEW, Uri.parse(SettingsViewModel.REPO_URL)),
+                        Intent(Intent.ACTION_VIEW, Uri.parse(AppInfo.REPO_URL)),
                         "未找到可打开网页的应用",
                     )
                 },
@@ -239,7 +246,7 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
             SettingsItemRow(
                 icon = { Icon(Icons.Default.MailOutline, null, Modifier.size(20.dp)) },
                 title = "联系开发者",
-                value = "caeamer@163.com · 问题反馈与建议",
+                value = "${AppInfo.CONTACT_EMAIL} · 问题反馈与建议",
                 trailing = {
                     Icon(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -249,11 +256,11 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
                 },
                 onClick = {
                     context.openExternal(
-                        Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:caeamer@163.com")).apply {
+                        Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${AppInfo.CONTACT_EMAIL}")).apply {
                             putExtra(Intent.EXTRA_SUBJECT, "贝壳课表 反馈")
                             putExtra(Intent.EXTRA_TEXT, "（请描述你遇到的问题或建议；版本 $appVersion）")
                         },
-                        "未找到邮件客户端，可直接发信至 caeamer@163.com",
+                        "未找到邮件客户端，可直接发信至 ${AppInfo.CONTACT_EMAIL}",
                     )
                 },
             )
@@ -324,6 +331,12 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             SettingsItemRow(
+                icon = { Icon(Icons.Default.Palette, null, Modifier.size(20.dp)) },
+                title = "课表外观",
+                value = "课程字号与背景图片",
+                onClick = { showAppearance = true },
+            )
+            SettingsItemRow(
                 icon = { Icon(Icons.Default.VisibilityOff, null, Modifier.size(20.dp)) },
                 title = "隐藏本周不上的课",
                 value = if (hideInactiveCourses) {
@@ -372,7 +385,7 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
             HorizontalDivider(Modifier.padding(horizontal = 16.dp))
             Spacer(Modifier.height(8.dp))
             Text(
-                "© 2026 caeamer. All rights reserved.",
+                "BeikeSchedulePro · ${AppInfo.DEVELOPER_NAME} 维护",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.fillMaxWidth(),

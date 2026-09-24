@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.webkit.WebView
@@ -58,6 +60,7 @@ fun ImportScreen(
     var webView by remember { mutableStateOf<WebView?>(null) }
     var pageError by remember { mutableStateOf<String?>(null) }
     var pageLoading by remember { mutableStateOf(true) }
+    var authPage by remember { mutableStateOf(false) }
 
     // 预览/错误态返回 → 回到 WebView 重新抓取；浏览/抓取态返回 → 退出整个导入流程。
     // 本页是 Launcher Activity 里的一个 composable 分支（不是独立 Activity），
@@ -125,12 +128,21 @@ fun ImportScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    pageError ?: "登录教务系统后将自动获取课表",
-                                    style = MaterialTheme.typography.bodySmall,
+                                    pageError ?: "登录后自动获取课表",
+                                    style = MaterialTheme.typography.bodyMedium,
                                     color = if (pageError != null) MaterialTheme.colorScheme.error
                                     else MaterialTheme.colorScheme.onSecondaryContainer,
                                     modifier = Modifier.weight(1f),
+                                    maxLines = if (pageError == null) 1 else 3,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
+                                IconButton(onClick = {
+                                    pageError = null
+                                    pageLoading = true
+                                    webView?.reload()
+                                }) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "重新加载教务网页")
+                                }
                                 OutlinedButton(onClick = runScript, enabled = state !is ImportUiState.Fetching) {
                                     Text(if (state is ImportUiState.Fetching) "抓取中…" else "手动抓取")
                                 }
@@ -138,6 +150,9 @@ fun ImportScreen(
                         }
                         if (state is ImportUiState.Fetching || pageLoading) {
                             LinearProgressIndicator(Modifier.fillMaxWidth())
+                        }
+                        if (authPage && state is ImportUiState.Browsing) {
+                            JwWechatLoginPanel(webView = webView, onMessage = { pageError = it })
                         }
                         JwWebView(
                             bridge = JwImportBridge(
@@ -153,6 +168,7 @@ fun ImportScreen(
                             onCreated = { webView = it },
                             onPageError = { pageError = it },
                             onPageProgress = { pageLoading = it < 100 },
+                            onAuthPageChanged = { authPage = it },
                             onPageStarted = {
                                 pageError = null
                                 // 抓取中若页面又导航（登录页跳转等），桥回调不会再来，

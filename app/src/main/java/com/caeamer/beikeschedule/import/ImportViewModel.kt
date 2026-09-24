@@ -8,6 +8,7 @@ import com.caeamer.beikeschedule.data.local.SectionTimeEntity
 import com.caeamer.beikeschedule.data.pref.SettingsStore
 import com.caeamer.beikeschedule.data.repo.ScheduleRepository
 import com.caeamer.beikeschedule.import.parser.JwParser
+import com.caeamer.beikeschedule.widget.WidgetUpdateCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -183,6 +184,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 )
                 _state.value = ImportUiState.Done
+                WidgetUpdateCoordinator.requestRefresh(getApplication())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

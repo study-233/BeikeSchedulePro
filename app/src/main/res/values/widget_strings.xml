@@ -1,0 +1,27 @@
+<resources>
+    <string name="widget_name">今日课表</string>
+    <string name="widget_description">查看正在上和接下来的课程，点按打开课表</string>
+    <string name="widget_title">我的课表</string>
+    <string name="widget_loading">正在读取课表…</string>
+    <string name="widget_load_failed">课表暂时无法读取</string>
+    <string name="widget_needs_setup">请先导入课表或设置学期</string>
+    <string name="widget_non_teaching">当前为非教学周</string>
+    <string name="widget_no_classes">今天没有课啦</string>
+    <string name="widget_empty_face">(〃\'▽\'〃)</string>
+    <string name="widget_finished">今日课程已结束</string>
+    <string name="widget_open_schedule">点按打开课表</string>
+    <string name="widget_more_courses">还有 %1$d 门</string>
+    <string name="widget_location_unknown">地点待定</string>
+    <string name="widget_sections">第%1$d–%2$d节</string>
+    <string name="widget_time_unknown">%1$s · 时间待完善</string>
+    <string name="widget_preview_date">8.1 周一</string>
+    <string name="widget_preview_first">数据可视化</string>
+    <string name="widget_preview_first_details">中心教学楼  孙老师</string>
+    <string name="widget_preview_first_time">09:00 - 09:50</string>
+    <string name="widget_preview_second">无人机技术实验</string>
+    <string name="widget_preview_second_details">10:10  多媒体实验室</string>
+    <string-array name="widget_weekdays">
+        <item>周一</item><item>周二</item><item>周三</item><item>周四</item>
+        <item>周五</item><item>周六</item><item>周日</item>
+    </string-array>
+</resources>

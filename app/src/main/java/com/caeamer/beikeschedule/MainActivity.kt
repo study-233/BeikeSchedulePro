@@ -1,5 +1,6 @@
 package com.caeamer.beikeschedule
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -54,8 +55,14 @@ import com.caeamer.beikeschedule.import.ImportViewModel
 import com.caeamer.beikeschedule.ui.grades.GradesScreen
 import com.caeamer.beikeschedule.ui.profile.ProfileScreen
 import com.caeamer.beikeschedule.ui.schedule.ScheduleScreen
+import com.caeamer.beikeschedule.ui.schedule.ScheduleViewModel
 import com.caeamer.beikeschedule.ui.theme.BeikeScheduleTheme
 import com.caeamer.beikeschedule.ui.theme.CourseColors
+import com.caeamer.beikeschedule.model.ScheduleAppearance
+import com.caeamer.beikeschedule.ui.schedule.ScheduleBackground
+import com.caeamer.beikeschedule.ui.settings.ScheduleAppearanceViewModel
+import com.caeamer.beikeschedule.widget.ScheduleWidget
+import com.caeamer.beikeschedule.widget.WidgetUpdateCoordinator
 
 /** 底部三个 Tab 的横向内容（课表/教务/我的）。需在 RowScope 内调用（用 weight 均分）。 */
 @Composable
@@ -119,6 +126,32 @@ private fun TabItem(
 
 class MainActivity : ComponentActivity() {
 
+    private var widgetOpenRequest by mutableStateOf(0)
+
+    override fun onStart() {
+        super.onStart()
+        WidgetUpdateCoordinator.requestRefresh(applicationContext)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("pending_widget_open", widgetOpenRequest)
+        super.onSaveInstanceState(outState)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        consumeWidgetIntent()
+    }
+
+    private fun consumeWidgetIntent() {
+        if (intent?.action == ScheduleWidget.ACTION_OPEN_SCHEDULE) {
+            widgetOpenRequest += 1
+            // 消费一次，避免旋转重建时再次跳转。
+            intent.action = null
+        }
+    }
+
     /**
      * 成绩隐私复位 + 课表定位复位：App 退到后台（Home/切应用/锁屏/划掉后台）即生效。
      * 前台内切换 Tab 不触发 onStop，因此成绩显示状态、课表上手动翻到的周次在 App 内得以保持。
@@ -139,6 +172,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        widgetOpenRequest = savedInstanceState?.getInt("pending_widget_open") ?: 0
+        consumeWidgetIntent()
         enableEdgeToEdge()
         val settings = SettingsStore(applicationContext)
         setContent {
@@ -162,9 +197,16 @@ class MainActivity : ComponentActivity() {
             // 导入 ViewModel 提到宿主：进入导入前要清掉上一次流程的终态（见 resetIfFinished），
             // 否则成功导入后同一进程内再也进不去导入页（会被 Done 终态立刻弹出来）
             val importViewModel: ImportViewModel = viewModel()
+            val appearanceViewModel: ScheduleAppearanceViewModel = viewModel()
+            val savedAppearance by appearanceViewModel.appearance.collectAsStateWithLifecycle()
+            val appearance = savedAppearance ?: ScheduleAppearance()
             BeikeScheduleTheme(darkTheme = darkTheme) {
                 var tab by rememberSaveable { mutableStateOf("schedule") }
                 var showImport by rememberSaveable { mutableStateOf(false) }
+                // 导入流程仍由原页面管理；有导入在途时保留请求，退出导入后再定位。
+                LaunchedEffect(widgetOpenRequest, showImport) {
+                    if (widgetOpenRequest > 0 && !showImport) tab = "schedule"
+                }
                 // 导入页的 WebView 展示的是浅底教务页面，需要临时切成深色状态栏图标
                 var importLightPage by remember { mutableStateOf(false) }
 
@@ -199,6 +241,9 @@ class MainActivity : ComponentActivity() {
                             },
                         ),
                     ) {
+                        if (useGradient) {
+                            ScheduleBackground(appearance, Modifier.fillMaxSize())
+                        }
                         Scaffold(
                             // 内容区不消费系统栏 insets：各页顶栏自行处理状态栏
                             contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -210,6 +255,11 @@ class MainActivity : ComponentActivity() {
                                     Row(
                                         Modifier
                                             .fillMaxWidth()
+                                            .background(
+                                                if (appearance.backgroundFile.isNotEmpty()) {
+                                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                                                } else Color.Transparent,
+                                            )
                                             .navigationBarsPadding()
                                             .height(56.dp)
                                             .padding(horizontal = 8.dp),
@@ -236,12 +286,22 @@ class MainActivity : ComponentActivity() {
                                 when (tab) {
                                     "jw" -> GradesScreen()
                                     "mine" -> ProfileScreen()
-                                    else -> ScheduleScreen(
-                                        onImportClick = {
-                                            importViewModel.resetIfFinished()
-                                            showImport = true
-                                        },
-                                    )
+                                    else -> {
+                                        val scheduleViewModel: ScheduleViewModel = viewModel()
+                                        LaunchedEffect(widgetOpenRequest) {
+                                            if (widgetOpenRequest > 0) {
+                                                scheduleViewModel.showCurrentWeek()
+                                                widgetOpenRequest = 0
+                                            }
+                                        }
+                                        ScheduleScreen(
+                                            onImportClick = {
+                                                importViewModel.resetIfFinished()
+                                                showImport = true
+                                            },
+                                            viewModel = scheduleViewModel,
+                                        )
+                                    }
                                 }
                             }
                         }

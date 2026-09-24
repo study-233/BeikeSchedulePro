@@ -28,7 +28,7 @@ import java.time.ZoneId
 object ExamReminderScheduler {
 
     const val EXAM_CHANNEL_ID = "exam_reminder"
-    const val ACTION_EXAM_REMIND = "com.caeamer.beikeschedule.action.EXAM_REMIND"
+    const val ACTION_EXAM_REMIND = "io.github.study233.beikeschedulepro.action.EXAM_REMIND"
     const val EXTRA_NAME = "name"
     const val EXTRA_TIME_TEXT = "timeText"
     const val EXTRA_LOCATION = "location"

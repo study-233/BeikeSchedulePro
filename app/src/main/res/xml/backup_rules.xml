@@ -9,6 +9,7 @@
     <exclude domain="database" path="beike_schedule.db-wal" />
     <exclude domain="database" path="beike_schedule.db-shm" />
     <exclude domain="file" path="datastore/" />
+    <exclude domain="file" path="schedule_backgrounds/" />
     <!--
       app_webview 属 root 域（getDataDir() 下、非 files/database/shared_prefs/cache 的子目录），
       里面存着 CookieManager 落盘的教务 SESSION cookie 与 DOM storage —— 那是可直接调用

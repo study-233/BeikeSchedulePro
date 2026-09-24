@@ -11,6 +11,7 @@ import com.caeamer.beikeschedule.data.local.TodoEntity
 import com.caeamer.beikeschedule.data.pref.SettingsStore
 import com.caeamer.beikeschedule.ui.theme.CourseColors
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -32,6 +33,14 @@ class ScheduleRepository(context: Context) {
     val grades: Flow<List<GradeEntity>> = gradeDao.observeAll()
     val exams: Flow<List<ExamEntity>> = examDao.observeAll()
     val todos: Flow<List<TodoEntity>> = todoDao.observeAll()
+
+    /** 课程与作息在同一读事务内获取；学期配置仍由 DataStore 独立提供。 */
+    suspend fun getScheduleSnapshot(): ScheduleSnapshot {
+        val (courses, sections) = db.withTransaction {
+            courseDao.getAll() to sectionTimeDao.getAll()
+        }
+        return ScheduleSnapshot(courses, sections, settings.semester.first())
+    }
 
     /** 覆盖式写入成绩（全量刷新语义）。单事务保证不会出现"清空后未写入"的中间态。 */
     suspend fun replaceGrades(grades: List<GradeEntity>) = db.withTransaction {

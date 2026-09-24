@@ -3,10 +3,12 @@ package com.caeamer.beikeschedule.ui.settings
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.caeamer.beikeschedule.AppInfo
 import com.caeamer.beikeschedule.data.pref.SettingsStore
 import com.caeamer.beikeschedule.data.repo.ScheduleRepository
 import com.caeamer.beikeschedule.import.parser.GradesParser
 import com.caeamer.beikeschedule.reminder.ExamReminderScheduler
+import com.caeamer.beikeschedule.widget.WidgetUpdateCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,7 +63,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setThemeMode(mode: SettingsStore.ThemeMode) {
-        viewModelScope.launch { settings.setThemeMode(mode) }
+        viewModelScope.launch {
+            settings.setThemeMode(mode)
+            WidgetUpdateCoordinator.requestRefresh(getApplication())
+        }
     }
 
     /** 清除成绩本地缓存（含考试安排与学业进度，下次进教务 Tab 重新抓取）。 */
@@ -102,11 +107,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         // 都泄漏连接直到 GC（弱网下表现为后续请求排队变慢）。
         var conn: HttpURLConnection? = null
         try {
-            conn = URL(RELEASES_API).openConnection() as HttpURLConnection
+            conn = URL(AppInfo.RELEASES_API).openConnection() as HttpURLConnection
             conn.connectTimeout = 10_000
             conn.readTimeout = 10_000
             conn.setRequestProperty("Accept", "application/vnd.github+json")
-            conn.setRequestProperty("User-Agent", "BeikeSchedule")
+            conn.setRequestProperty("User-Agent", "BeikeSchedulePro")
             if (conn.responseCode != 200) {
                 return@withContext UpdateState.Failed("GitHub 请求失败（HTTP ${conn.responseCode}）")
             }
@@ -116,7 +121,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             // body 可能是 JSON null：jsonPrimitive.content 对字面量 null 会返回字符串 "null"，
             // 直接进更新说明会显示"null"。显式判空。
             val notes = obj["body"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content.orEmpty().take(300)
-            val url = obj["html_url"]?.jsonPrimitive?.content ?: REPO_URL
+            val url = obj["html_url"]?.jsonPrimitive?.content ?: AppInfo.REPO_URL
             when {
                 GradesParser.compareVersions(tag, installed) > 0 ->
                     UpdateState.Available(tag.removePrefix("v"), notes, url)
@@ -131,10 +136,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
-        /** 仓库主页（"我的"页 GitHub 入口与更新检查共用）。 */
-        const val REPO_URL = "https://github.com/coderirse/BeikeSchedule"
-        private const val RELEASES_API = "https://api.github.com/repos/coderirse/BeikeSchedule/releases/latest"
-
         /** 外部系统入口（"我的"页外链组）。课程平台/实践平台地址待补后追加。 */
         const val PINGJIAO_URL = "https://pingjiao.ustb.edu.cn"
         const val SRTP_URL = "https://srtp.ustb.edu.cn"

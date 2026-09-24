@@ -1,0 +1,4 @@
+interface:
+  display_name: "贝壳课表版本发布"
+  short_description: "为贝壳课表独立发行版准备版本配置、中文说明及 GitHub 发布步骤"
+  default_prompt: "使用 $beikeschedule-release 为 BeikeSchedulePro 准备下一版本的配置、中文发布说明和发布命令，遵守当前仓库的执行范围。"

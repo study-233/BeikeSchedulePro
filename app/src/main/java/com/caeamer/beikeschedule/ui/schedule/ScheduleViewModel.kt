@@ -11,6 +11,7 @@ import com.caeamer.beikeschedule.data.repo.ScheduleRepository
 import com.caeamer.beikeschedule.import.parser.JwParser
 import com.caeamer.beikeschedule.model.WeekResolver
 import com.caeamer.beikeschedule.reminder.ClassReminderScheduler
+import com.caeamer.beikeschedule.widget.WidgetUpdateCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -152,7 +153,10 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setThemeMode(mode: SettingsStore.ThemeMode) {
-        viewModelScope.launch { repo.settings.setThemeMode(mode) }
+        viewModelScope.launch {
+            repo.settings.setThemeMode(mode)
+            refreshWidget()
+        }
     }
 
     init {
@@ -206,6 +210,18 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
         val minutes: Int,
     )
 
+    /** Widget 点击时显式回到当前周，即使 Activity 已经在前台。 */
+    fun showCurrentWeek() {
+        viewModelScope.launch {
+            val semester = repo.settings.semester.first()
+            selectedWeek.value = WeekResolver.defaultWeek(WeekResolver.locateWeek(semester), semester.totalWeeks)
+        }
+    }
+
+    private fun refreshWidget() {
+        WidgetUpdateCoordinator.requestRefresh(getApplication())
+    }
+
     fun selectWeek(week: Int) {
         selectedWeek.value = week
     }
@@ -213,6 +229,7 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
     fun saveCourse(course: CourseEntity) {
         viewModelScope.launch {
             if (course.id == 0L) repo.addManualCourse(course) else repo.updateCourse(course)
+            refreshWidget()
         }
     }
 
@@ -223,6 +240,7 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
     fun saveCourses(courses: List<CourseEntity>, replaceIds: List<Long>?) {
         viewModelScope.launch {
             repo.replaceCourses(replaceIds.orEmpty(), courses)
+            refreshWidget()
         }
     }
 
@@ -232,7 +250,10 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 隐藏/恢复教务导入课程。 */
     fun setCourseHidden(id: Long, hidden: Boolean) {
-        viewModelScope.launch { repo.setCourseHidden(id, hidden) }
+        viewModelScope.launch {
+            repo.setCourseHidden(id, hidden)
+            refreshWidget()
+        }
     }
 
     /**
@@ -242,11 +263,17 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
      * 与手动多时段课都是多行合并成一张卡，只改一行会让卡片继续留在网格上。
      */
     fun setCoursesHidden(ids: List<Long>, hidden: Boolean) {
-        viewModelScope.launch { repo.setCoursesHidden(ids, hidden) }
+        viewModelScope.launch {
+            repo.setCoursesHidden(ids, hidden)
+            refreshWidget()
+        }
     }
 
     fun deleteCourse(id: Long) {
-        viewModelScope.launch { repo.deleteCourse(id) }
+        viewModelScope.launch {
+            repo.deleteCourse(id)
+            refreshWidget()
+        }
     }
 
     /** 从 assets 载入示例课表；若未设置开学日期，则把本周一设为第 1 周周一便于立即查看。 */
@@ -266,14 +293,21 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 )
             }
+            refreshWidget()
         }
     }
 
     fun clearSampleData() {
-        viewModelScope.launch { repo.clearSampleData() }
+        viewModelScope.launch {
+            repo.clearSampleData()
+            refreshWidget()
+        }
     }
 
     fun saveSemester(config: SettingsStore.SemesterConfig) {
-        viewModelScope.launch { repo.settings.saveSemester(config) }
+        viewModelScope.launch {
+            repo.settings.saveSemester(config)
+            refreshWidget()
+        }
     }
 }

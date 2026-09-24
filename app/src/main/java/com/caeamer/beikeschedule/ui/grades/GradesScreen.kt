@@ -85,6 +85,7 @@ import com.caeamer.beikeschedule.data.repo.GpaCalculator
 import com.caeamer.beikeschedule.import.GradesBridge
 import com.caeamer.beikeschedule.ui.common.rememberNow
 import com.caeamer.beikeschedule.import.JwWebView
+import com.caeamer.beikeschedule.import.JwWechatLoginPanel
 import com.caeamer.beikeschedule.import.loadAssetScript
 import com.caeamer.beikeschedule.ui.schedule.DropdownField
 import com.caeamer.beikeschedule.ui.todo.TodoScreen
@@ -307,6 +308,7 @@ private fun WebViewFetch(
     var pageLoading by remember { mutableStateOf(true) }
     var pageError by remember { mutableStateOf<String?>(null) }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var authPage by remember { mutableStateOf(false) }
 
     val runScript: () -> Unit = {
         onFetchStart()
@@ -327,18 +329,30 @@ private fun WebViewFetch(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    pageError ?: "登录教务系统后将自动获取成绩、考试与学业进度",
-                    style = MaterialTheme.typography.bodySmall,
+                    pageError ?: "登录后自动获取成绩与考试",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = if (pageError != null) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                    maxLines = if (pageError == null) 1 else 3,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                IconButton(onClick = {
+                    pageError = null
+                    pageLoading = true
+                    webView?.reload()
+                }) {
+                    Icon(Icons.Default.Refresh, contentDescription = "重新加载教务网页")
+                }
                 // 取消出口：不想现在登录、或进错了段位时，不必杀进程
                 TextButton(onClick = onCancel) { Text("取消") }
             }
         }
         if (fetching || pageLoading) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        if (authPage && !fetching) {
+            JwWechatLoginPanel(webView = webView, onMessage = { pageError = it })
         }
         JwWebView(
             bridge = GradesBridge(
@@ -352,8 +366,12 @@ private fun WebViewFetch(
             onCreated = { webView = it },
             onPageError = { pageError = it },
             onPageProgress = { pageLoading = it < 100 },
+            onAuthPageChanged = { authPage = it },
             // 抓取中页面又导航时桥回调不会再来，复位抓取态避免进度条一直转
-            onPageStarted = onPageStarted,
+            onPageStarted = {
+                pageError = null
+                onPageStarted()
+            },
         )
     }
 }

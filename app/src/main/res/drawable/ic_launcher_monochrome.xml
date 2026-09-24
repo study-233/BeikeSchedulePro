@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Cow embracing a ding; keep the silhouette within the adaptive icon safe zone. -->
+    <group android:pivotX="54" android:pivotY="54" android:scaleX="0.6" android:scaleY="0.6">
+        <!-- Horns and ears. -->
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M36,27 C27,27 24,22 27,15 Q29,12 30,17 Q31,22 39,23 Z M69,27 C78,28 81,23 78,17 Q76,14 75,19 Q73,24 67,24 Z M33,30 Q23,23 18,28 Q19,35 31,36 Z M74,31 Q84,26 90,30 Q88,37 76,37 Z" />
+        <!-- Head, swept tuft, and facial details cut out of the single-color silhouette. -->
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+            android:pathData="M32,36 Q32,27 42,24 Q40,19 42,15 Q46,20 50,20 Q47,11 53,7 Q53,14 60,17 Q66,20 68,25 Q76,27 76,38 L74,44 Q74,52 65,55 L43,55 Q33,53 33,46 Z M36,35 Q42,37 47,33 L47,36 Q43,41 37,39 Z M57,34 Q63,38 69,37 L68,40 Q62,42 57,37 Z M44,45 C41,45 41,49 44,49 C47,49 47,45 44,45 Z M58,45 C55,45 55,49 58,49 C61,49 61,45 58,45 Z M49,50 Q55,53 60,49 L61,51 Q55,56 49,52 Z" />
+        <!-- Open rectangular ding handles and the broad rim. -->
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+            android:pathData="M21,53 L20,41 Q20,38 24,38 L31,38 Q35,38 35,42 L36,53 Z M25,43 L26,51 L30,51 L30,43 Z M73,53 L74,42 Q74,38 78,38 L86,38 Q90,38 89,42 L88,53 Z M79,43 L78,51 L83,51 L84,43 Z M22,54 L87,54 Q90,54 88,58 L22,58 Q19,57 22,54 Z" />
+        <!-- Tapered vessel belly with six timetable cells as negative space. -->
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+            android:pathData="M26,61 L83,61 L79,80 Q78,85 73,85 L36,85 Q30,85 29,80 Z M37,65 L51,65 L51,69 L37,69 Z M57,65 L71,65 L71,69 L57,69 Z M37,72 L51,72 L51,76 L37,76 Z M57,72 L71,72 L71,76 L57,76 Z M37,79 L51,79 L51,82 L37,82 Z M57,79 L71,79 L71,82 L57,82 Z" />
+        <!-- Hands hold the sides below the handles. -->
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M24,61 Q17,61 17,69 Q17,75 24,75 Q28,74 27,69 Z M85,61 Q92,61 92,69 Q92,75 85,75 Q81,74 82,69 Z" />
+        <!-- Two separate splayed feet make the ding recognizable at small sizes. -->
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M32,85 L44,85 L41,95 L42,98 L29,98 Q27,98 29,94 Z M65,85 L77,85 L80,94 Q82,98 80,98 L67,98 L68,95 Z" />
+    </group>
+</vector>

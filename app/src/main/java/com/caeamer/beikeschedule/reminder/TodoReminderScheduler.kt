@@ -31,7 +31,7 @@ import java.time.ZoneId
 object TodoReminderScheduler {
 
     const val CHANNEL_ID = "todo_reminder"
-    const val ACTION_TODO_REMIND = "com.caeamer.beikeschedule.action.TODO_REMIND"
+    const val ACTION_TODO_REMIND = "io.github.study233.beikeschedulepro.action.TODO_REMIND"
     const val EXTRA_TITLE = "title"
     const val EXTRA_TIME_TEXT = "timeText"
     const val EXTRA_MINUTES = "minutes"

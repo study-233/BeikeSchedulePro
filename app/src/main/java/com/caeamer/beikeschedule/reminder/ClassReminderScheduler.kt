@@ -31,8 +31,8 @@ import java.time.ZoneId
 object ClassReminderScheduler {
 
     const val CHANNEL_ID = "class_reminder"
-    const val ACTION_REMIND = "com.caeamer.beikeschedule.action.REMIND"
-    const val ACTION_DAILY_PULSE = "com.caeamer.beikeschedule.action.DAILY_PULSE"
+    const val ACTION_REMIND = "io.github.study233.beikeschedulepro.action.REMIND"
+    const val ACTION_DAILY_PULSE = "io.github.study233.beikeschedulepro.action.DAILY_PULSE"
     const val EXTRA_NAME = "name"
     const val EXTRA_LOCATION = "location"
     const val EXTRA_TIME_TEXT = "timeText"

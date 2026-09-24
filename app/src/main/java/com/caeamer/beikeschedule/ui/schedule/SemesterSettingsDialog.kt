@@ -31,6 +31,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.caeamer.beikeschedule.ui.settings.ScheduleAppearanceDialog
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,6 +70,7 @@ fun SemesterSettingsDialog(
     var firstMonday by remember { mutableStateOf(current.firstMonday) }
     var totalWeeks by remember { mutableIntStateOf(current.totalWeeks) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var showAppearance by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     // 系统层面的开关是同步查询，每次打开设置页现算，保证是最新值
     val notificationsBlocked = remember { notificationsBlocked(context) }
@@ -129,6 +132,9 @@ fun SemesterSettingsDialog(
                 HorizontalDivider()
 
                 // —— 显示 ——
+                OutlinedButton(onClick = { showAppearance = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("课表外观 · 字号与背景")
+                }
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -279,6 +285,10 @@ fun SemesterSettingsDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+
+    if (showAppearance) {
+        ScheduleAppearanceDialog(onDismiss = { showAppearance = false })
+    }
 
     if (showDatePicker) {
         val pickerState = rememberDatePickerState(

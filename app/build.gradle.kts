@@ -19,12 +19,12 @@ android {
     }
 
     defaultConfig {
-        //对外分发的正式包名（2026-08 起，旧 com.example 包名的安装无法覆盖升级，需重装导入）
-        applicationId = "com.caeamer.beikeschedule"
+        // 独立发行版，与原版共存；数据独立保存，首次安装需重新导入。
+        applicationId = "io.github.study233.beikeschedulepro"
         minSdk = 34
         targetSdk = 37
-        versionCode = 40
-        versionName = "1.2.5"
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -88,6 +88,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.webkit)
+    implementation(libs.zxing.core)
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.work.runtime)
     testImplementation(libs.junit)
     // org.json 在 JVM 单测里是 Android SDK 的 stub（方法返回 null/抛异常），
     // 解析器单测必须用真实实现替换它
