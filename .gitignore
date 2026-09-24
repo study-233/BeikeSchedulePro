@@ -1,25 +1,28 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
+# Gradle、Kotlin 和 Android 构建缓存
+.gradle/
+.kotlin/
+build/
+.cxx/
+.externalNativeBuild/
+captures/
 
-# release signing (secrets)
+# IDE 和系统文件
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# 本地配置与签名凭据
+local.properties
 keystore.properties
 keystore/
+*.jks
+*.keystore
 
-# 构建产物（实机测试包放仓库根目录，避免误入库）
+# 发布产物与调试日志
+/app/release/
 *.apk
-
-# IDE 全量忽略（此前只忽略部分 .idea 子路径，其余会漏进 git status）
-.idea/
+*.aab
+*.apks
+*.log
+*.hprof
