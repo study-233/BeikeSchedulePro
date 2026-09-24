@@ -1,16 +1,6 @@
-name: CI
+name: Android CI
 
-# 这个仓库有 260+ 个单测，但它们此前只在 README 里写了"怎么跑"——
-# 没有任何自动化在执行，所以回归只能靠手工。CI 做四件事：
-#   1. 跑单测（解析器/周次/计算器/提醒排期）
-#   2. 跑 Android Lint（debug 变体，不开 warningsAsErrors）
-#   3. 编译 debug 包
-#   4. 跑一次 release 的 R8 压缩（minifyReleaseWithR8）——不需要签名，
-#      但能覆盖"只在 release/R8 下才暴露"的问题（keep 规则、反射、资源裁剪）
-#
-# 未接 ktlint：现有代码有大量格式问题，一次性接入会产生一个淹没真实改动的
-# 巨型 diff，建议单独一轮做。
-
+# 单模块 app 的四项独立检查；release 仅验证 R8，不在 CI 中签名或发布 APK。
 on:
   push:
     branches: [main]
@@ -18,57 +8,69 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+  checks:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Unit tests
+            task: :app:testDebugUnitTest
+            report_name: test-results
+            report_path: app/build/reports/tests/testDebugUnitTest/
+          - name: Android Lint
+            task: :app:lintDebug
+            report_name: lint-results
+            report_path: app/build/reports/lint-results-debug.html
+          - name: Assemble debug
+            task: :app:assembleDebug
+            report_name: ''
+            report_path: ''
+          - name: Minify release (R8)
+            task: :app:minifyReleaseWithR8
+            report_name: ''
+            report_path: ''
 
     steps:
       - uses: actions/checkout@v4
 
-      # 与 gradle/gradle-daemon-jvm.properties 的 toolchainVersion=21 保持一致
+      # 与 gradle/gradle-daemon-jvm.properties 中的 Java 21 保持一致。
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
+      # 与 app/build.gradle.kts 的 compileSdk 37 保持一致。
+      - name: Set up Android SDK 37
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-37'
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Unit tests
-        run: ./gradlew testDebugUnitTest --console=plain
+      - name: Ensure Gradle wrapper is executable
+        run: chmod +x ./gradlew
 
-      - name: Android Lint
-        run: ./gradlew lintDebug --console=plain
+      - name: Run ${{ matrix.name }}
+        run: ./gradlew ${{ matrix.task }} --console=plain
 
-      # 只做 assembleDebug：release 需要 keystore.properties（未入库），
-      # 在 CI 上不可用。debug 变体足以验证 R8 之外的完整构建链路。
-      - name: Assemble debug
-        run: ./gradlew assembleDebug --console=plain
-
-      # release 的 R8 链路单独跑一次：这个任务不打包、不需要签名，
-      # 但会真正执行 R8（keep 规则/反射/序列化相关的问题只有在这一步才暴露，
-      # 而它是本项目唯一没有自动化覆盖的构建环节）
-      - name: Minify release (R8)
-        run: ./gradlew minifyReleaseWithR8 --console=plain
-
-      - name: Upload test report
-        if: always()
+      - name: Upload report
+        if: ${{ always() && matrix.report_path != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
-          path: app/build/reports/tests/testDebugUnitTest/
+          name: ${{ matrix.report_name }}
+          path: ${{ matrix.report_path }}
           if-no-files-found: ignore
-
-      - name: Upload lint report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-results
-          path: app/build/reports/lint-results-debug.html
-          if-no-files-found: ignore
+          retention-days: 7
