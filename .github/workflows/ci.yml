@@ -51,11 +51,11 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # 与 app/build.gradle.kts 的 compileSdk 37 保持一致。
-      - name: Set up Android SDK 37
+      # API 37 的 SDK 包名包含小版本号；与 compileSdk release(37) 保持一致。
+      - name: Set up Android SDK 37.0
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools platforms;android-37'
+          packages: 'platform-tools platforms;android-37.0 build-tools;37.0.0'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
