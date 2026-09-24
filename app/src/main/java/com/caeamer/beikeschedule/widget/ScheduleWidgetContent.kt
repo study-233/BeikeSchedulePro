@@ -1,5 +1,6 @@
 package com.caeamer.beikeschedule.widget
 
+import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import androidx.compose.runtime.Composable
@@ -60,11 +61,11 @@ internal fun ScheduleWidgetContent(state: ScheduleWidgetState) {
         SettingsStore.ThemeMode.SYSTEM ->
             context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     }
-    val primary = widgetColor(state.theme, R.color.widget_text_primary, 0xFF242329, 0xFFF2EFF6)
-    val secondary = widgetColor(state.theme, R.color.widget_text_secondary, 0xFF65636C, 0xFFC5C1CF)
-    val muted = widgetColor(state.theme, R.color.widget_text_muted, 0xFF817E87, 0xFFA8A3B3)
-    val accent = widgetColor(state.theme, R.color.widget_accent, 0xFF3962A8, 0xFFAFC9FF)
-    val surface = widgetColor(state.theme, R.color.widget_surface, 0xFFEFEDF4, 0xFF25232C)
+    val primary = widgetColor(context, state.theme, R.color.widget_text_primary, 0xFF242329, 0xFFF2EFF6)
+    val secondary = widgetColor(context, state.theme, R.color.widget_text_secondary, 0xFF65636C, 0xFFC5C1CF)
+    val muted = widgetColor(context, state.theme, R.color.widget_text_muted, 0xFF817E87, 0xFFA8A3B3)
+    val accent = widgetColor(context, state.theme, R.color.widget_accent, 0xFF3962A8, 0xFFAFC9FF)
+    val surface = widgetColor(context, state.theme, R.color.widget_surface, 0xFFEFEDF4, 0xFF25232C)
     val openSchedule = Intent(context, MainActivity::class.java).apply {
         action = ScheduleWidget.ACTION_OPEN_SCHEDULE
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -247,9 +248,9 @@ private fun CourseEntry(
 
 private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
 
-private fun widgetColor(mode: SettingsStore.ThemeMode, resource: Int, light: Long, dark: Long): ColorProvider =
+private fun widgetColor(context: Context, mode: SettingsStore.ThemeMode, resource: Int, light: Long, dark: Long): ColorProvider =
     when (mode) {
-        SettingsStore.ThemeMode.SYSTEM -> ColorProvider(resource)
+        SettingsStore.ThemeMode.SYSTEM -> ColorProvider(Color(context.getColor(resource)))
         SettingsStore.ThemeMode.LIGHT -> ColorProvider(Color(light))
         SettingsStore.ThemeMode.DARK -> ColorProvider(Color(dark))
     }
