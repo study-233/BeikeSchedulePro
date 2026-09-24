@@ -1,5 +1,7 @@
 # BeikeSchedulePro · 贝壳课表
 
+> 感谢原作者 **caeamer** 创建 [BeikeSchedule](https://github.com/coderirse/BeikeSchedule)，为本项目奠定基础。
+
 **面向北京科技大学（USTB）学生的 Android 课表与教务助手。**
 
 从教务系统导入课表和成绩，在手机上查看每周课程、考试安排、个人日程与空闲教室。
@@ -8,18 +10,17 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white)](app/build.gradle.kts)
 [![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4)](app/src/main/java/com/caeamer/beikeschedule/ui)
 
-[下载与发布](https://github.com/study-233/BeikeSchedulePro/releases) · [问题反馈](https://github.com/study-233/BeikeSchedulePro/issues) · [联系维护者](mailto:mrtaoyx@gmail.com) · [开发文档](docs/TECH_DESIGN.md)
+[下载 APK](https://github.com/study-233/BeikeSchedulePro/releases) · [问题反馈](https://github.com/study-233/BeikeSchedulePro/issues) · [联系维护者](mailto:mrtaoyx@gmail.com) · [开发文档](docs/TECH_DESIGN.md)
 
-> **发布状态：独立发行版 v1.0.0 已发布。**
-> 首版使用独立应用 ID，可与原版共存。请从本仓库 Releases 下载签名 APK。
+> **v1.0.0 已发布。** 前往 [Releases](https://github.com/study-233/BeikeSchedulePro/releases) 下载签名 APK。
 
-## 能做什么
+## 主要功能
 
 | 功能 | 说明 |
 | --- | --- |
 | 课表导入 | 内置 WebView 登录本研一体化教务系统，导入前预览确认 |
 | 每周课表 | 同步教学周日历，支持滑动切周、单双周、冲突课程并排显示 |
-| 桌面课表 | 2×2 今日课程卡片，显示正在上和接下来的课程；仍待真机验收 |
+| 桌面课表 | 2×2 今日课程卡片，显示正在上和接下来的课程 |
 | 课程管理 | 手动添加和编辑课程，隐藏或恢复课程，按需隐藏周末与非本周课程 |
 | 成绩与学业 | 按学期查看成绩、排名、加权平均分、GPA 和学分修读进度 |
 | 考试安排 | 查看考试倒计时、时间、考点和座位号 |
@@ -44,23 +45,17 @@
 
 </details>
 
-## 下载与使用
+## 下载安装
 
-1. 从 [本仓库 Releases](https://github.com/study-233/BeikeSchedulePro/releases) 下载签名 APK；最低支持 **Android 14（API 34）**。
-2. 打开应用，在内置页面登录 [北京科技大学本研一体化教务系统](https://byyt.ustb.edu.cn)，预览并导入课表。
-3. 按需导入成绩和考试安排，设置个人日程，并开启需要的通知权限与提醒选项。
+最低支持 **Android 14（API 34）**。选择下载渠道：
 
-### 独立发行版说明
+- [GitHub Releases](https://github.com/study-233/BeikeSchedulePro/releases)：下载签名 APK。
+- [蓝奏云](https://wwazq.lanzoub.com/b01gibyh4d)：密码 `1234`。
 
-| 项目 | 首版 |
-| --- | --- |
-| 应用名称 | 贝壳课表 |
-| 版本名 / 内部版本码 | 1.0.0 / 1 |
-| 应用 ID | `io.github.study233.beikeschedulepro` |
-| APK 命名 | `BeikeSchedulePro-v1.0.0.apk` |
-| 维护者 | [study-233](https://github.com/study-233) |
+安装后：
 
-独立版与原版的数据、偏好和登录会话相互独立，可同时安装。首次使用需要重新登录、导入课程与成绩，并重新设置个人日程和提醒；不会自动迁移原版数据。后续本发行版升级需保持相同应用 ID 和签名，并递增内部版本码。
+1. 在应用内登录 [北京科技大学本研一体化教务系统](https://byyt.ustb.edu.cn)，预览并导入课表。
+2. 按需导入成绩和考试安排，设置个人日程，并开启需要的通知权限与提醒选项。
 
 ## 隐私与数据
 
@@ -71,7 +66,7 @@
 - 空闲教室数据来自贝壳教学平台（`ustb.smartclass.cn`）。请求携带平台公开配置生成的签名参数和设备网络出口 IP，不包含学号、姓名或本机课表等个人数据。
 - 应用需要访问学校服务及 GitHub 更新接口；对应服务的可用性会影响导入、查询或更新检查。
 
-## 开发与构建
+## 开发信息
 
 项目采用单个 `app` 模块：
 
@@ -84,23 +79,9 @@
 | 教务导入 | WebView 登录会话 · JavaScript 注入 · 结构化 JSON |
 | 空闲教室 | 贝壳教学平台接口 |
 
-工具链、SDK 和依赖要求以仓库配置为准，当前 Gradle daemon 请求 **Java 21**。使用项目自带的 Gradle wrapper，无需全局安装 Gradle。
+工具链、SDK 和依赖要求以仓库配置为准，当前 Gradle daemon 请求 **Java 21**。在仓库根目录使用自带的 Gradle wrapper：Windows PowerShell 为 `.\gradlew.bat`，macOS / Linux 为 `./gradlew`。常用任务包括 `assembleDebug`、`testDebugUnitTest`、`lintDebug` 和 `minifyReleaseWithR8`。
 
-Windows PowerShell：
-
-```powershell
-.\gradlew.bat assembleDebug
-.\gradlew.bat testDebugUnitTest lintDebug minifyReleaseWithR8 --console=plain
-```
-
-macOS / Linux：
-
-```bash
-./gradlew assembleDebug
-./gradlew testDebugUnitTest lintDebug minifyReleaseWithR8 --console=plain
-```
-
-正式签名 APK 使用 `assembleRelease` 构建，需要维护者自己的 `keystore.properties` 和签名密钥；私人配置、密钥与 APK 不加入源码提交。以上命令供开发者执行；自动检查与设备验收状态以首版发布说明为准。
+正式签名 APK 使用 `assembleRelease` 构建，需要维护者自己的 `keystore.properties` 和签名密钥；私人配置、密钥与 APK 不加入源码提交。
 
 ### 文档与发布
 
@@ -108,7 +89,7 @@ macOS / Linux：
 - [技术设计](docs/TECH_DESIGN.md)：架构与早期设计背景；历史版本描述请与当前源码对照。
 - [桌面课表 Widget](docs/WIDGET_DESIGN.md)：布局、数据流、后台调度限制与手动验收步骤。
 - [CI 配置](.github/workflows/ci.yml)：自动检查任务的来源。
-- 仓库提供发布 skill `$beikeschedule-release`（`.agents/skills/beikeschedule-release/SKILL.md`）及首版说明（`docs/releases/v1.0.0.md`），用于准备版本配置、中文发布说明与发布步骤。
+- [v1.0.0 发布说明](docs/releases/v1.0.0.md)：查看版本内容与发布记录。
 
 ## 反馈与联系
 
