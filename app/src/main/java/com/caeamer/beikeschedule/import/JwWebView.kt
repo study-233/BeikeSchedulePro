@@ -372,6 +372,21 @@ fun JwWebView(
                             .replace("__BEIKE_NAVIGATION_ID__", navigationId.toString()), null)
                     }
                 }
+                fun recoverSessionProbe(view: WebView, failure: SessionProbeFailure) {
+                    if (!failure.offerSchoolPage) {
+                        errorCallback(failure.message)
+                        return
+                    }
+                    // 探测失败不等于会话过期。保持请求等待并展示页面，不能销毁唯一的登录入口。
+                    authFallbackCallback(failure.message)
+                    if (isMainPageUrl(view.url.orEmpty()) && !homeFallbackUsed && authSearchNavigation == null) {
+                        homeFallbackUsed = true
+                        view.loadUrl(JW_HOME)
+                    } else if (authSearchNavigation == null) {
+                        // 登录按钮可能由 SPA 稍后挂载，沿用有 10 秒上限的搜索；每轮最多自动点击一次。
+                        openAuthentication(view)
+                    }
+                }
                 // 教务登录页 PC 布局加载慢，且默认白背景刺眼；设淡暖色底让加载过程更柔和
                 setBackgroundColor(android.graphics.Color.parseColor("#F5EFEF"))
                 settings.javaScriptEnabled = true
@@ -420,7 +435,10 @@ fun JwWebView(
                         "onAuthRequired" -> openAuthentication(view)
                         "onAuthOpening" -> openingAuthCallback()
                         "onAuthEntryMissing" -> authFallbackCallback("未找到统一身份认证入口，请在学校页面继续登录，或点击重新加载")
-                        "onError" -> errorCallback("检查登录会话失败，请检查网络后重试，已有数据已保留")
+                        "onError" -> {
+                            val args = envelope.optJSONArray("args")
+                            recoverSessionProbe(view, SessionProbeFailure.fromCode(args?.optString(0), args?.optString(1)))
+                        }
                     }
                 }
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {

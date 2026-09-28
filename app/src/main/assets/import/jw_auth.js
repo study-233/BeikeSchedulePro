@@ -19,11 +19,19 @@
     window.BeikeAuth = {
         read: function (response) {
             if (response.status === 401) return Promise.reject(expired());
-            if (!response.ok) return Promise.reject(new Error('教务请求失败（HTTP ' + response.status + '）'));
+            if (!response.ok) {
+                var httpError = new Error('教务请求失败（HTTP ' + response.status + '）');
+                httpError.beikeHttpStatus = response.status;
+                return Promise.reject(httpError);
+            }
             if (response.redirected && loginUrl(response.url)) return Promise.reject(expired());
             return response.text().then(function (text) {
                 if (loginHtml(text)) throw expired();
-                if (/^\s*</.test(text)) throw new Error('教务响应格式异常，请稍后重试');
+                if (/^\s*</.test(text)) {
+                    var formatError = new Error('教务响应格式异常，请稍后重试');
+                    formatError.beikeSessionReason = 'UNEXPECTED_HTML';
+                    throw formatError;
+                }
                 var value;
                 try { value = JSON.parse(text); } catch (_) { return text; }
                 if (value && (value.code === 401 || value.code === '401')) throw expired();

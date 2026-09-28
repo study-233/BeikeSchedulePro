@@ -15,7 +15,7 @@ function page(nodes = []) {
     let interval;
     const messages = [];
     const context = vm.createContext({
-        URL, URLSearchParams, AbortSignal,
+        URL, URLSearchParams, AbortSignal, AbortController, setTimeout, clearTimeout,
         Date: { now: () => now },
         location: { origin: 'https://byyt.ustb.edu.cn', pathname: '/authentication/login' },
         document: { querySelectorAll: () => nodes },
@@ -44,6 +44,7 @@ test('有效会话仅探测一次 不回传身份信息', { timeout: 2000 }, asy
     assert.equal(calls[0].url, '/user/me');
     assert.equal(calls[0].options.credentials, 'same-origin');
     assert.equal(calls[0].options.cache, 'no-store');
+    assert.equal(calls[0].options.redirect, 'manual');
     assert.deepEqual(messages, [{ fn: 'onSessionReady', args: [], requestId: '7' }]);
 });
 
@@ -118,15 +119,113 @@ test('明确的认证响应才触发失效 403 5xx 和普通 HTML 保持为错�
 });
 
 test('断网与缺失身份字段不会自动要求登录', { timeout: 2000 }, async () => {
-    for (const reply of [new TypeError('Network error'), response('{}')]) {
+    for (const [reply, reason] of [[new TypeError('Network error'), 'NETWORK'], [response('{}'), 'MISSING_IDENTITY']]) {
         const { context } = page();
         let finish;
         const result = new Promise(resolve => { finish = resolve; });
         context.window.BeikeSession.postMessage = text => finish(JSON.parse(text));
         context.fetch = async () => { if (reply instanceof Error) throw reply; return reply; };
         vm.runInContext(session, context);
-        assert.equal((await result).fn, 'onError');
+        assert.deepEqual(await result, { fn: 'onError', args: [reason], requestId: '7' });
     }
+});
+
+test('跨域跳转只报告待确认 不误判为断网或直接开始同步', { timeout: 2000 }, async () => {
+    const { context } = page();
+    let finish;
+    const result = new Promise(resolve => { finish = resolve; });
+    context.window.BeikeSession.postMessage = text => finish(JSON.parse(text));
+    context.fetch = async (_, options) => {
+        assert.equal(options.redirect, 'manual');
+        return { type: 'opaqueredirect', status: 0, ok: false,
+            text: () => { throw new Error('不应读取不透明跳转响应'); } };
+    };
+    vm.runInContext(session, context);
+    assert.deepEqual(await result, { fn: 'onError', args: ['REDIRECT'], requestId: '7' });
+});
+
+test('探测期间异步出现的学校登录按钮仍能触发认证', { timeout: 2000 }, async () => {
+    const nodes = [];
+    const { context } = page(nodes);
+    let finish;
+    const result = new Promise(resolve => { finish = resolve; });
+    context.window.BeikeSession.postMessage = text => finish(JSON.parse(text));
+    context.fetch = async () => {
+        nodes.push({ innerText: '统一身份认证', getClientRects: () => [1] });
+        throw new TypeError('Failed to fetch');
+    };
+    vm.runInContext(session, context);
+    assert.deepEqual(await result, { fn: 'onAuthRequired', args: [], requestId: '7' });
+});
+
+test('会话诊断区分HTTP及格式错误且不泄露响应正文', { timeout: 2000 }, async () => {
+    for (const [reply, args] of [
+        [response('private-response', { status: 403, ok: false }), ['HTTP', '403']],
+        [response('<html>统一身份认证</html>', { status: 503, ok: false }), ['HTTP', '503']],
+        [response('private-response'), ['INVALID_JSON']],
+        [response('<html>维护页面 fixture-private</html>'), ['UNEXPECTED_HTML']],
+    ]) {
+        const { context } = page();
+        let finish;
+        const result = new Promise(resolve => { finish = resolve; });
+        context.window.BeikeSession.postMessage = text => finish(JSON.parse(text));
+        context.fetch = async () => reply;
+        vm.runInContext(session, context);
+        assert.deepEqual(await result, { fn: 'onError', args, requestId: '7' });
+    }
+});
+
+test('HTTP服务错误优先于探测期间出现的登录按钮', { timeout: 2000 }, async () => {
+    const nodes = [];
+    const { context } = page(nodes);
+    let finish;
+    const result = new Promise(resolve => { finish = resolve; });
+    context.window.BeikeSession.postMessage = text => finish(JSON.parse(text));
+    context.fetch = async () => {
+        nodes.push({ innerText: '统一身份认证', getClientRects: () => [1] });
+        return response('', { status: 503, ok: false });
+    };
+    vm.runInContext(session, context);
+    assert.deepEqual(await result, { fn: 'onError', args: ['HTTP', '503'], requestId: '7' });
+});
+
+test('不依赖AbortSignal timeout且超时会中止请求并清理定时器', { timeout: 2000 }, async () => {
+    const { context } = page();
+    context.AbortSignal = undefined;
+    let timer;
+    let cleared = false;
+    let requested;
+    const started = new Promise(resolve => { requested = resolve; });
+    let finish;
+    const result = new Promise(resolve => { finish = resolve; });
+    context.setTimeout = (callback, milliseconds) => {
+        assert.equal(milliseconds, 20000);
+        timer = callback;
+        return 9;
+    };
+    context.clearTimeout = id => { assert.equal(id, 9); cleared = true; };
+    context.fetch = (_, options) => new Promise((_, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+        requested();
+    });
+    context.window.BeikeSession.postMessage = text => finish(JSON.parse(text));
+    vm.runInContext(session, context);
+    await started;
+    timer();
+    assert.deepEqual(await result, { fn: 'onError', args: ['TIMEOUT'], requestId: '7' });
+    // onError 后的 finally 在随后的微任务中执行。
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cleared, true);
+});
+
+test('同步fetch异常也通过原因码返回 不包含原始异常', { timeout: 2000 }, async () => {
+    const { context } = page();
+    let finish;
+    const result = new Promise(resolve => { finish = resolve; });
+    context.window.BeikeSession.postMessage = text => finish(JSON.parse(text));
+    context.fetch = () => { throw new TypeError('fixture-private-url-and-cookie'); };
+    vm.runInContext(session, context);
+    assert.deepEqual(await result, { fn: 'onError', args: ['NETWORK'], requestId: '7' });
 });
 
 test('课表 成绩和公告脚本均将认证过期作为独立事件回传', { timeout: 2000 }, async () => {

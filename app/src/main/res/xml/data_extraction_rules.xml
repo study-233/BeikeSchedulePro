@@ -6,6 +6,8 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="file" path="datastore/app_update.preferences_pb" />
+        <exclude domain="external" path="Download/updates/" />
         <exclude domain="database" path="beike_schedule.db" />
         <exclude domain="database" path="beike_schedule.db-wal" />
         <exclude domain="database" path="beike_schedule.db-shm" />
@@ -14,6 +16,8 @@
         <exclude domain="root" path="app_webview/" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="file" path="datastore/app_update.preferences_pb" />
+        <exclude domain="external" path="Download/updates/" />
         <exclude domain="root" path="app_webview/" />
     </device-transfer>
 </data-extraction-rules>

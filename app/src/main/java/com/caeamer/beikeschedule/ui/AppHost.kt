@@ -38,7 +38,8 @@ import com.caeamer.beikeschedule.ui.settings.*
 
 /** 主导航、二级页和详情都在同一宿主内；WebView 导入流程由 Activity 单独管理。 */
 @Composable
-fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel, widgetOpenRequest: Int,
+fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel,
+            appUpdateViewModel: com.caeamer.beikeschedule.update.AppUpdateViewModel, widgetOpenRequest: Int,
             onWidgetConsumed: () -> Unit, onImport: () -> Unit) {
     val schedule: ScheduleViewModel = viewModel()
     val settings: SettingsViewModel = viewModel()
@@ -177,6 +178,7 @@ fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel, widgetOpenRequest:
                                                     onClearSample = schedule::clearSampleData,
                                                     hasSample = state.hasSample,
                                                     viewModel = settings,
+                                                    updateViewModel = appUpdateViewModel,
                                                 )
                                             }
                                         }

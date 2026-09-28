@@ -5,6 +5,8 @@
   注意 minSdk 34 时系统走 data_extraction_rules.xml，本文件仅为低版本兜底。
 -->
 <full-backup-content>
+    <exclude domain="file" path="datastore/app_update.preferences_pb" />
+    <exclude domain="external" path="Download/updates/" />
     <exclude domain="database" path="beike_schedule.db" />
     <exclude domain="database" path="beike_schedule.db-wal" />
     <exclude domain="database" path="beike_schedule.db-shm" />

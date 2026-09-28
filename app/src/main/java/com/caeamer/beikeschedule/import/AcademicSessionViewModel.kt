@@ -75,7 +75,8 @@ class AcademicSessionViewModel(app: Application) : AndroidViewModel(app) {
             if (state.value.browserPhase == AcademicBrowserPhase.OPENING_AUTH) {
                 showManualLogin("自动进入认证页面超时，请在学校页面继续登录，或点击重新加载")
             } else if (state.value.browserPhase == AcademicBrowserPhase.CHECKING) {
-                pageFailed("检查登录会话超时，请检查网络后重试，已有数据已保留")
+                // 超时也不能封死登录入口；真实主框架加载错误仍由 pageFailed 终止。
+                showManualLogin(SessionProbeFailure.fromCode("TIMEOUT").message)
             }
         }
     }

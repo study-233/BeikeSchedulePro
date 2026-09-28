@@ -116,6 +116,7 @@ class MainActivity : ComponentActivity() {
             val academicState by academicSession.state.collectAsStateWithLifecycle()
             val importState by importViewModel.state.collectAsStateWithLifecycle()
             val appearanceViewModel: ScheduleAppearanceViewModel = viewModel()
+            val appUpdateViewModel: com.caeamer.beikeschedule.update.AppUpdateViewModel = viewModel()
             BeikeScheduleTheme(darkTheme = darkTheme) {
                 var showImport by rememberSaveable { mutableStateOf(false) }
                 LaunchedEffect(academicState.importEvent) {
@@ -169,6 +170,7 @@ class MainActivity : ComponentActivity() {
                             hostHolder.SaveableStateProvider("app_host") {
                                 com.caeamer.beikeschedule.ui.AppHost(
                                     appearanceViewModel = appearanceViewModel,
+                                    appUpdateViewModel = appUpdateViewModel,
                                     widgetOpenRequest = widgetOpenRequest,
                                     onWidgetConsumed = { widgetOpenRequest = 0 },
                                     onImport = {
@@ -181,6 +183,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     AcademicSessionHost(academicSession, importViewModel::onFetchStart, onCloseImport = { showImport = false })
+                    com.caeamer.beikeschedule.update.AppUpdateHost(
+                        appUpdateViewModel,
+                        blocked = showImport || academicState.browserVisible || academicState.active,
+                    )
                 }
             }
         }

@@ -33,7 +33,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.caeamer.beikeschedule.AppInfo
 import com.caeamer.beikeschedule.data.pref.SettingsStore
 import com.caeamer.beikeschedule.ui.settings.SettingsViewModel
-import com.caeamer.beikeschedule.ui.settings.UpdateState
+import com.caeamer.beikeschedule.update.AppUpdateViewModel
 
 import com.caeamer.beikeschedule.model.SettingsPage
 import com.caeamer.beikeschedule.ui.common.AddScheduleWidgetRow
@@ -46,14 +46,14 @@ import androidx.activity.compose.BackHandler
 @Composable
 fun ProfileScreen(onSettings: (SettingsPage) -> Unit, onAcademic: () -> Unit,
                   onClearSample: () -> Unit, hasSample: Boolean,
-                  viewModel: SettingsViewModel = viewModel()) {
+                  viewModel: SettingsViewModel = viewModel(),
+                  updateViewModel: AppUpdateViewModel = viewModel()) {
     val openAcademic = onAcademic
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
-    val update by viewModel.update.collectAsStateWithLifecycle()
+    val update by updateViewModel.state.collectAsStateWithLifecycle()
     val studentProfile by viewModel.studentProfile.collectAsStateWithLifecycle()
     val appVersion by viewModel.appVersion.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
     var showThemeDialog by rememberSaveable { mutableStateOf(false) }
     var showClearSample by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
@@ -87,13 +87,7 @@ fun ProfileScreen(onSettings: (SettingsPage) -> Unit, onAcademic: () -> Unit,
                 SettingsRow("账号与数据", "一键同步全部教务数据、公告与缓存管理", openAcademic)
             }
             SettingsGroup("关于") {
-                SettingsRow("检查更新", when (val u = update) {
-                    is UpdateState.Checking -> "正在检查…"
-                    is UpdateState.UpToDate -> "已是最新版本"
-                    is UpdateState.Available -> "发现新版本 v${u.latestVersion}"
-                    is UpdateState.Failed -> u.message
-                    UpdateState.Idle -> "检查 GitHub Releases"
-                }, { if (update is UpdateState.Available) showUpdateDialog = true else viewModel.checkUpdate() })
+                SettingsRow("检查更新", update.summary, updateViewModel::checkManually)
                 SettingsRow("版本", appVersion)
                 SettingsRow("项目仓库", "查看源码", {
                     context.openExternal(Intent(Intent.ACTION_VIEW, Uri.parse(AppInfo.REPO_URL)), "未找到可打开网页的应用")
@@ -112,27 +106,6 @@ fun ProfileScreen(onSettings: (SettingsPage) -> Unit, onAcademic: () -> Unit,
         title = { Text("清除示例课表") }, text = { Text("只删除示例课程，保留导入和手动添加的课程。") },
         confirmButton = { TextButton(onClick = { onClearSample(); showClearSample = false }) { Text("清除") } },
         dismissButton = { TextButton(onClick = { showClearSample = false }) { Text("取消") } })
-
-    if (showUpdateDialog) {
-        val u = update
-        if (u is UpdateState.Available) {
-            AlertDialog(
-                onDismissRequest = { showUpdateDialog = false },
-                title = { Text("发现新版本 v${u.latestVersion}") },
-                text = { if (u.notes.isNotBlank()) Text(u.notes, style = MaterialTheme.typography.bodySmall) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        context.openExternal(
-                            Intent(Intent.ACTION_VIEW, Uri.parse(u.url)),
-                            "未找到可打开网页的应用",
-                        )
-                        showUpdateDialog = false
-                    }) { Text("前往下载") }
-                },
-                dismissButton = { TextButton(onClick = { showUpdateDialog = false }) { Text("关闭") } },
-            )
-        }
-    }
 
     if (showThemeDialog) {
         ThemePickerDialog(
