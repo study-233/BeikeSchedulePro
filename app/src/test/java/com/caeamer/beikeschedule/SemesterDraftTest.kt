@@ -16,12 +16,14 @@ class SemesterDraftTest {
     }
     @Test fun `保存只合并可编辑字段并保护最新官方校历`() {
         val draft = SemesterDraft.from(original).copy(name = " 新名称 ", firstMonday = "2026-09-14", totalWeeks = 16)
-        val latest = original.copy(xn = "2026", xq = "2", weekMondays = List(22) { "week_$it" })
+        val latest = original.copy(xn = "2026", xq = "2", weekMondays = List(22) { "week_$it" },
+            holidayDates = listOf("2026-09-25"))
         val saved = draft.applyTo(latest)
         assertEquals("新名称", saved.name)
         assertEquals("2026-09-14", saved.firstMonday)
         assertEquals(22, saved.totalWeeks)
         assertEquals(latest.weekMondays, saved.weekMondays)
+        assertEquals(latest.holidayDates, saved.holidayDates)
         assertEquals(latest.xn, saved.xn)
         assertEquals(latest.xq, saved.xq)
     }

@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import com.caeamer.beikeschedule.model.ScheduleNames
 import com.caeamer.beikeschedule.reminder.ClassReminderScheduler
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 /** 教务导入状态机。 */
 sealed interface ImportUiState {
@@ -61,13 +62,14 @@ sealed interface ImportUiState {
         val totalWeeks: Int,
         val courses: List<CourseEntity>,
         val sectionTimes: List<SectionTimeEntity>,
+        val holidayDates: List<String> = emptyList(),
         val targetId: Long? = null,
         val createNew: Boolean = true,
         val newName: String = "",
         val nameInitialized: Boolean = false,
         val saveError: String? = null,
     ) : ImportUiState {
-        fun semesterConfig() = SettingsStore.SemesterConfig(xn, xq, semesterName, firstMonday, totalWeeks, weekMondays)
+        fun semesterConfig() = SettingsStore.SemesterConfig(xn, xq, semesterName, firstMonday, totalWeeks, weekMondays, holidayDates)
         val scheduledCount get() = courses.count { !it.isUnscheduled }
         val unscheduledCount get() = courses.count { it.isUnscheduled }
     }
@@ -87,6 +89,55 @@ class ImportViewModel internal constructor(
 
     private val _state = MutableStateFlow<ImportUiState>(ImportUiState.Browsing)
     val state: StateFlow<ImportUiState> = _state
+    private var requestGuard: () -> Unit = {}
+    private var requestSaving: () -> Unit = {}
+    private var requestFinished: (String?) -> Unit = {}
+    private var requestCommitted: () -> Unit = {}
+    private var commitJob: kotlinx.coroutines.Job? = null
+
+    /** 唯一匹配才自动更新；不依据当前选中的课表猜测导入目标。 */
+    suspend fun acceptSyncResult(event: ImportFetchEvent, automatic: Boolean, session: AcademicSessionViewModel) {
+        val values = event.values ?: return
+        session.ensureImportCurrent(event.id)
+        requestGuard = { session.ensureImportCurrent(event.id) }
+        requestSaving = { session.importSaving(event.id) }
+        requestFinished = { session.importFinished(event.id, it) }
+        requestCommitted = { session.importCommitted(event.id) }
+        onFetchResult(values[0], values[1], values[2], values[3], values[4], values[5])
+        val preview = state.value as? ImportUiState.Preview
+        if (preview == null) {
+            session.importFinished(event.id, (state.value as? ImportUiState.Error)?.message ?: "课表解析失败")
+            return
+        }
+        try {
+            val all = repo.schedules.first()
+            requestGuard()
+            val matches = matchingSchedules(all, preview.xn, preview.xq)
+            _state.value = preview.copy(
+                newName = ScheduleNames.available(preview.semesterName, all.map { it.name }), nameInitialized = true,
+                createNew = matches.isEmpty() || !automatic,
+                targetId = if (automatic) matches.singleOrNull()?.id else null,
+            )
+            if (automatic && matches.size == 1) confirmImportInternal(false, activateTarget = false)
+            else session.importReview(event.id)
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            val message = e.message ?: "读取课表失败，请重试"
+            _state.value = preview.copy(saveError = message)
+            session.importFinished(event.id, message)
+        }
+    }
+
+    fun cancelPendingImport() {
+        commitJob?.cancel()
+        _state.value = ImportUiState.Browsing
+        requestGuard = {}; requestSaving = {}; requestFinished = {}; requestCommitted = {}
+    }
+
+    companion object {
+        internal fun matchingSchedules(schedules: List<com.caeamer.beikeschedule.data.local.ScheduleEntity>, xn: String, xq: String) =
+            schedules.filter { xn.isNotBlank() && xq.isNotBlank() && it.xn == xn && it.xq == xq }
+    }
 
     val schedules = repo.schedules.retryWhen { cause, _ ->
         if (cause is CancellationException) throw cause
@@ -151,6 +202,7 @@ class ImportViewModel internal constructor(
                 firstMonday = JwParser.parseFirstMonday(weekDates)
                     ?: weekCalendar.weekMondays.firstOrNull().orEmpty(),
                 weekMondays = weekCalendar.weekMondays,
+                holidayDates = weekCalendar.holidayDates,
                 totalWeeks = weekCalendar.totalWeeks.takeIf { it > 0 } ?: 20,
                 courses = courseList,
                 sectionTimes = sectionTimes,
@@ -194,31 +246,42 @@ class ImportViewModel internal constructor(
 
     /** 失败恢复完整预览及目标选择，提交事务不可拆成课表和 DataStore 两次写入。 */
     fun confirmImport(allowDifferentSemester: Boolean = false) {
+        confirmImportInternal(allowDifferentSemester, activateTarget = true)
+    }
+
+    private fun confirmImportInternal(allowDifferentSemester: Boolean, activateTarget: Boolean) {
         val preview = _state.value as? ImportUiState.Preview ?: return
         if (!preview.createNew && preview.targetId == null) return
+        val guard = requestGuard
+        val finished = requestFinished
+        val committed = requestCommitted
+        try { requestSaving(); guard() } catch (_: CancellationException) { return }
         _state.value = ImportUiState.Committing
-        viewModelScope.launch {
+        commitJob = viewModelScope.launch {
             try {
                 repo.commitImport(
                     if (preview.createNew) null else preview.targetId,
                     preview.newName, preview.semesterConfig(), preview.courses, preview.sectionTimes,
-                    allowDifferentSemester,
+                    allowDifferentSemester, activateTarget, guard,
                 )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _state.value = preview.copy(saveError = e.message ?: "保存失败，请重试")
+                finished(e.message ?: "保存失败，请重试")
                 return@launch
             }
+            committed()
             // 数据已经提交；外部刷新失败不能把成功导入变成可重复提交的预览。
             try {
                 afterImport()
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 // 打开应用及每日脉冲会重新尝试排期。
-            } finally {
-                _state.value = ImportUiState.Done
             }
+            guard()
+            finished(null)
+            _state.value = ImportUiState.Done
         }
     }
 }

@@ -32,6 +32,17 @@ private val Context.dataStore by preferencesDataStore(
 /** 学期与提醒等配置（DataStore）。 */
 class SettingsStore(private val context: Context) {
 
+    /** 仅保存各项成功时间，不保存登录凭证或失败响应。 */
+    val academicSyncTimes: Flow<Map<String, Long>> = context.dataStore.data.map { preferences ->
+        preferences.asMap().entries.filter { it.key.name.startsWith("academic_sync_") }
+            .associate { it.key.name.removePrefix("academic_sync_") to (it.value as? Long ?: 0L) }
+    }
+    suspend fun saveAcademicSyncTime(task: String, time: Long = System.currentTimeMillis()) {
+        context.dataStore.edit { it[longPreferencesKey("academic_sync_$task")] = time }
+    }
+    suspend fun saveGpa(gpa: String) { context.dataStore.edit { it[Keys.GPA_CACHE] = gpa } }
+    suspend fun saveGradesTime(time: Long) { context.dataStore.edit { it[Keys.GRADES_FETCHED_AT] = time } }
+
     data class SemesterConfig(
         val xn: String = "",          // 学年，如 "2026-2027"
         val xq: String = "",          // 学期，如 "1"
@@ -43,6 +54,8 @@ class SettingsStore(private val context: Context) {
          * 来自教务校历接口，长假周不占序号；为空时回退 firstMonday + totalWeeks 推算。
          */
         val weekMondays: List<String> = emptyList(),
+        /** 学校校历逐日放假标记，含学校标记的周末；缺失时不自行推算。 */
+        val holidayDates: List<String> = emptyList(),
     )
 
     /** 学籍快照（教务抓取时顺手存，"我的"页离线展示）。 */

@@ -97,7 +97,7 @@ fun ImportScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            AcademicSyncStatus(syncState.gradesRequest, academicSession::startGrades)
+            AcademicSyncStatus(syncState.gradesRequest, { academicSession.retry(AcademicTask.GRADES) }, syncState.browserPhase.label)
             Box(Modifier.weight(1f)) {
                 when (val s = state) {
                     is ImportUiState.Browsing, is ImportUiState.Fetching -> {

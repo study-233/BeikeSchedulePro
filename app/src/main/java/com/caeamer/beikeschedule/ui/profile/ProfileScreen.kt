@@ -32,7 +32,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.caeamer.beikeschedule.AppInfo
 import com.caeamer.beikeschedule.data.pref.SettingsStore
-import com.caeamer.beikeschedule.import.clearJwSession
 import com.caeamer.beikeschedule.ui.settings.SettingsViewModel
 import com.caeamer.beikeschedule.ui.settings.UpdateState
 
@@ -48,16 +47,13 @@ import androidx.activity.compose.BackHandler
 fun ProfileScreen(onSettings: (SettingsPage) -> Unit, onAcademic: () -> Unit,
                   onClearSample: () -> Unit, hasSample: Boolean,
                   viewModel: SettingsViewModel = viewModel()) {
-    val academicSession: com.caeamer.beikeschedule.import.AcademicSessionViewModel = viewModel()
-    val openAcademic = { academicSession.startGrades(); onAcademic() }
+    val openAcademic = onAcademic
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
     val studentProfile by viewModel.studentProfile.collectAsStateWithLifecycle()
     val appVersion by viewModel.appVersion.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
-    var showClearCacheConfirm by rememberSaveable { mutableStateOf(false) }
-    var showLogoutConfirm by rememberSaveable { mutableStateOf(false) }
     var showThemeDialog by rememberSaveable { mutableStateOf(false) }
     var showClearSample by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
@@ -67,7 +63,7 @@ fun ProfileScreen(onSettings: (SettingsPage) -> Unit, onAcademic: () -> Unit,
                 SettingsRow(
                     if (studentProfile.isLoggedIn) studentProfile.xm.ifBlank { "学籍信息" } else "获取学籍信息",
                     if (studentProfile.isLoggedIn) listOf(studentProfile.xh, studentProfile.zymc).filter { it.isNotBlank() }.joinToString(" · ")
-                    else "登录教务系统并获取成绩后显示",
+                    else "登录并同步教务数据后显示",
                     { if (studentProfile.isLoggedIn) onSettings(SettingsPage.STUDENT) else openAcademic() },
                 )
             }
@@ -88,9 +84,7 @@ fun ProfileScreen(onSettings: (SettingsPage) -> Unit, onAcademic: () -> Unit,
                 }, { showThemeDialog = true })
             }
             SettingsGroup("账号与数据") {
-                SettingsRow("教务账号", "登录后自动获取成绩与考试", openAcademic)
-                SettingsRow("清除成绩缓存", "成绩、GPA、教务考试与学业进度；保留手动考试", { showClearCacheConfirm = true }, destructive = true)
-                SettingsRow("退出教务登录", "保留本地课表与成绩", { showLogoutConfirm = true }, destructive = true)
+                SettingsRow("账号与数据", "一键同步全部教务数据、公告与缓存管理", openAcademic)
             }
             SettingsGroup("关于") {
                 SettingsRow("检查更新", when (val u = update) {
@@ -151,52 +145,6 @@ fun ProfileScreen(onSettings: (SettingsPage) -> Unit, onAcademic: () -> Unit,
         )
     }
 
-    if (showClearCacheConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearCacheConfirm = false },
-            title = { Text("清除成绩缓存") },
-            // 文案必须写全：clearGradesCache() 实际清掉的不止成绩与 GPA，
-            // 还包括教务考试与学业进度，手动考试及其提醒保留。
-            text = {
-                Text(
-                    "将删除本地的：成绩与 GPA、教务考试安排、学业进度（学分类别要求 / 毕业总进度），" +
-                        "并取消这些教务考试的提醒。\n\n" +
-                        "手动考试及其提醒、课表与隐藏设置不受影响。教务数据需重新抓取。是否继续？",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    academicSession.cancelGrades()
-                    viewModel.clearGradesCache()
-                    showClearCacheConfirm = false
-                }) { Text("清除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton(onClick = { showClearCacheConfirm = false }) { Text("取消") } },
-        )
-    }
-
-    if (showLogoutConfirm) {
-        AlertDialog(
-            onDismissRequest = { showLogoutConfirm = false },
-            title = { Text("退出教务登录") },
-            text = {
-                Text(
-                    "将清除本机保存的教务系统登录状态（会话 Cookie 与网页存储），" +
-                        "下次导入或抓取成绩需要重新登录统一身份认证。\n\n" +
-                        "本地的课表与成绩数据不会被删除。",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    academicSession.cancelForLogout()
-                    clearJwSession(context)
-                    showLogoutConfirm = false
-                    Toast.makeText(context, "已退出教务登录", Toast.LENGTH_SHORT).show()
-                }) { Text("退出登录", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton(onClick = { showLogoutConfirm = false }) { Text("取消") } },
-        )
-    }
 }
 
 @Composable
@@ -211,7 +159,7 @@ fun StudentProfileScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 "在校状态" to profile.xjsfzx.takeIf { it.isNotBlank() }?.let { if (it == "1") "在校" else "不在校" }.orEmpty(),
                 "注册状态" to profile.xjsfzc.takeIf { it.isNotBlank() }?.let { if (it == "1") "已注册" else "未注册" }.orEmpty(),
             ).filter { it.second.isNotBlank() }.forEach { (label, value) -> ProfileRow(label, value) }
-            if (!profile.isLoggedIn) Text("暂无学籍信息，请在校园页获取成绩。")
+            if (!profile.isLoggedIn) Text("暂无学籍信息，请在账号与数据页同步。")
         }
     }
 }

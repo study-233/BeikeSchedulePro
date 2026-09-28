@@ -1,4 +1,4 @@
-﻿package com.caeamer.beikeschedule.ui.grades
+package com.caeamer.beikeschedule.ui.grades
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -106,12 +106,13 @@ fun GradesScreen(viewModel: GradesViewModel = viewModel()) {
     }
     val academicSession: com.caeamer.beikeschedule.import.AcademicSessionViewModel = viewModel()
     val syncState by academicSession.state.collectAsStateWithLifecycle()
+    val syncTimes by academicSession.syncTimes.collectAsStateWithLifecycle(emptyMap())
+    val syncAll = { academicSession.startSync() }
     val sectionHolder = rememberSaveableStateHolder()
     val rooms: FreeRoomViewModel? = if (state.section == CampusSection.FREE_ROOM) viewModel() else null
     val context = androidx.compose.ui.platform.LocalContext.current
     var moreExpanded by remember { mutableStateOf(false) }
     var showSource by remember { mutableStateOf(false) }
-    var showRefreshConfirm by remember { mutableStateOf(false) }
     var detailGrade by remember { mutableStateOf<GradeEntity?>(null) }
 
     Scaffold(
@@ -124,9 +125,18 @@ fun GradesScreen(viewModel: GradesViewModel = viewModel()) {
                 if (state.section == CampusSection.EXAMS) TextButton(
                     onClick = { viewModel.openExamEditor() }, enabled = !examEditor.saving,
                 ) { Text("添加考试") }
-                IconButton(enabled = (state.section == CampusSection.FREE_ROOM || syncState.gradesRequest?.active != true) && state.section != null, onClick = {
-                    if (state.section == CampusSection.FREE_ROOM) rooms?.refresh() else showRefreshConfirm = true
-                }) { Icon(Icons.Default.Refresh, if (state.section == CampusSection.FREE_ROOM) "刷新空教室" else "刷新成绩与考试") }
+                IconButton(enabled = state.section != null && (state.section == CampusSection.FREE_ROOM ||
+                    (!syncState.clearing && if (state.section == CampusSection.NOTICES) syncState[com.caeamer.beikeschedule.import.AcademicTask.NOTICES]?.active != true else !syncState.active)), onClick = {
+                    when (state.section) {
+                        CampusSection.FREE_ROOM -> rooms?.refresh()
+                        CampusSection.NOTICES -> academicSession.startNotices()
+                        else -> syncAll()
+                    }
+                }) { Icon(Icons.Default.Refresh, when (state.section) {
+                    CampusSection.FREE_ROOM -> "刷新空教室"
+                    CampusSection.NOTICES -> "刷新公告"
+                    else -> "一键同步教务数据"
+                }) }
                 Box {
                     IconButton(onClick = { moreExpanded = true }) { Icon(Icons.Default.MoreVert, "更多") }
                     DropdownMenu(moreExpanded, { moreExpanded = false }) {
@@ -144,27 +154,10 @@ fun GradesScreen(viewModel: GradesViewModel = viewModel()) {
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            if (showRefreshConfirm) {
-                AlertDialog(
-                    onDismissRequest = { showRefreshConfirm = false },
-                    title = { Text("重新抓取") },
-                    text = { Text("将进入教务系统重新抓取成绩、GPA、考试安排与学业进度，当前本地数据会保留到抓取成功。是否继续？") },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            showRefreshConfirm = false
-                            academicSession.startGrades()
-                        }) { Text("继续") }
-                    },
-                    dismissButton = { TextButton(onClick = { showRefreshConfirm = false }) { Text("取消") } },
-                )
-            }
             // 栏目内容保留原生状态；唯一教务 WebView 由 Activity 宿主承载。
             Column(Modifier.fillMaxSize()) {
                 SectionTabs(section = state.section, onSelect = viewModel::setSection)
 
-                if (state.section == CampusSection.SCORES || state.section == CampusSection.EXAMS) {
-                    com.caeamer.beikeschedule.import.AcademicSyncStatus(syncState.gradesRequest, academicSession::startGrades)
-                }
                 sectionHolder.SaveableStateProvider(state.section?.id ?: "loading") {
                 when {
                     // 分段偏好还没从 DataStore 读到（冷启动最初几帧）：只显示上面的分段行。
@@ -174,6 +167,7 @@ fun GradesScreen(viewModel: GradesViewModel = viewModel()) {
 
                     // 无课教室的数据来自校外平台，与教务会话无关，独立成页
                     CampusSection.FREE_ROOM == state.section -> rooms?.let { FreeRoomScreen(it) }
+                    CampusSection.NOTICES == state.section -> com.caeamer.beikeschedule.ui.notices.NoticesScreen(academicSession)
 
                     // 考试分段自带 error/未抓取态：此前不传 error，失败提示在考试段永远看不到，
                     // 而"从未抓取"也被说成"本学期暂无考试安排"
@@ -183,13 +177,13 @@ fun GradesScreen(viewModel: GradesViewModel = viewModel()) {
                         onEdit = viewModel::openExamEditor,
                         editingEnabled = !examEditor.saving,
                         error = state.error,
-                        fetchedAt = state.fetchedAt,
-                        onFetch = academicSession::startGrades,
+                        fetchedAt = syncTimes[com.caeamer.beikeschedule.import.AcademicTask.EXAMS.name] ?: state.fetchedAt,
+                        onFetch = syncAll,
                         onDismissError = viewModel::dismissError,
                     )
 
                     state.grades.isEmpty() && state.exams.all { it.isManual } ->
-                        NoGradesYet(error = state.error, onFetch = academicSession::startGrades)
+                        NoGradesYet(error = state.error, onFetch = syncAll)
 
                     else -> GradesContent(
                         state = state,
@@ -215,7 +209,7 @@ fun GradesScreen(viewModel: GradesViewModel = viewModel()) {
     }
 
     if (showSource) AlertDialog(onDismissRequest = { showSource = false }, title = { Text("数据来源") },
-        text = { Text("空教室数据来自贝壳教学平台，仅供实时查询参考；成绩、教务考试与学籍信息来自学校教务系统；手动考试由你录入，均保存在本机。") },
+        text = { Text("空教室数据来自贝壳教学平台，仅供实时查询参考；成绩、教务考试、学籍与公告来自学校教务系统；手动考试由你录入。同步缓存保存在本机，公告原文在浏览器打开。") },
         confirmButton = { TextButton(onClick = { showSource = false }) { Text("关闭") } })
 
     detailGrade?.let { grade ->
@@ -243,7 +237,7 @@ private fun NoGradesYet(error: String?, onFetch: () -> Unit) {
         Text("还没有成绩数据", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
         Text(
-            "登录教务系统即可自动获取成绩、GPA 与考试安排",
+            "登录教务系统，一次同步课表、成绩、考试与公告等数据",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -194,6 +194,33 @@ class JwParserTest {
     }
 
     @Test
+    fun `放假日期去重排序并忽略无效条目且不改变跳周`() {
+        val calendar = JwParser.parseWeekCalendar(
+            """{"totalWeeks":18,"weeks":[
+                {"zc":1,"monday":"2026-09-07"},
+                {"zc":2,"monday":"2026-09-14"},
+                {"zc":3,"monday":"2026-09-21"},
+                {"zc":4,"monday":"2026-10-05"}
+            ],"holidayDates":["2026-10-07","2026-09-25","2026-10-05","2026-10-06",
+                "2026-09-26","2026-09-25",null,"","invalid","2026-02-30",{},123]}""",
+        )
+        assertEquals(listOf("2026-09-25", "2026-09-26", "2026-10-05", "2026-10-06", "2026-10-07"), calendar.holidayDates)
+        assertEquals("2026-10-05", calendar.weekMondays[3])
+        assertEquals(4, calendar.weekMondays.size)
+    }
+
+    @Test
+    fun `旧周历和错误放假字段不推算周末`() {
+        for (extra in listOf("", ",\"holidayDates\":null", ",\"holidayDates\":{}")) {
+            val calendar = JwParser.parseWeekCalendar(
+                """{"totalWeeks":18,"weeks":[{"zc":1,"monday":"2026-09-07"}]$extra}""",
+            )
+            assertTrue(calendar.holidayDates.isEmpty())
+            assertEquals(listOf("2026-09-07"), calendar.weekMondays)
+        }
+    }
+
+    @Test
     fun `解析教学周日历 - 空数据与非法输入回退空列表`() {
         assertEquals(0, JwParser.parseWeekCalendar("""{"totalWeeks":18,"weeks":[]}""").weekMondays.size)
         assertEquals(18, JwParser.parseWeekCalendar("""{"totalWeeks":18,"weeks":[]}""").totalWeeks)

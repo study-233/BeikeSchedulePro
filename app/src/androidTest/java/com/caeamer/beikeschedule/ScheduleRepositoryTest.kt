@@ -122,13 +122,14 @@ class ScheduleRepositoryTest {
     }
 
     @Test fun failedImportRollsBackCourseCalendarSectionsAndActiveSelection() = runBlocking {
-        val a = repo.commitImport(null, "A", semester, listOf(course()), times)
+        val a = repo.commitImport(null, "A", semester.copy(holidayDates = listOf("2026-09-25")), listOf(course()), times)
         val before = repo.getScheduleSnapshot()
         val b = repo.createSchedule("B")
         db.openHelper.writableDatabase.execSQL(
             "CREATE TRIGGER fail_section BEFORE INSERT ON section_time BEGIN SELECT RAISE(ABORT, 'test failure'); END")
         assertTrue(runCatching {
-            repo.commitImport(a, "A", semester.copy(firstMonday = "2026-08-31"), listOf(course().copy(name = "新课")), times)
+            repo.commitImport(a, "A", semester.copy(firstMonday = "2026-08-31", holidayDates = listOf("2026-10-05")),
+                listOf(course().copy(name = "新课")), times)
         }.isFailure)
         assertEquals(b, repo.getScheduleSnapshot().scheduleId)
         repo.switchSchedule(a)
@@ -139,6 +140,23 @@ class ScheduleRepositoryTest {
         val count = repo.schedules.first().size
         assertTrue(runCatching { repo.commitImport(null, "失败新课表", semester, listOf(course()), times) }.isFailure)
         assertEquals(count, repo.schedules.first().size)
+    }
+
+    @Test fun holidayDatesAreIsolatedReplacedAndPreservedWhenClearingCourses() = runBlocking {
+        val aCalendar = semester.copy(holidayDates = listOf("2026-09-25", "2026-09-26"))
+        val a = repo.commitImport(null, "A", aCalendar, listOf(course()), times)
+        val b = repo.commitImport(null, "B", semester.copy(holidayDates = listOf("2026-10-05")), listOf(course()), times)
+        repo.switchSchedule(a)
+        assertEquals(aCalendar.holidayDates, repo.getScheduleSnapshot().semester.holidayDates)
+        repo.clearSchedule(a)
+        assertEquals(aCalendar.holidayDates, repo.getScheduleSnapshot().semester.holidayDates)
+        repo.commitImport(a, "A", aCalendar.copy(holidayDates = listOf("2026-09-27")), listOf(course()), times)
+        assertEquals(listOf("2026-09-27"), repo.getScheduleSnapshot().semester.holidayDates)
+        repo.switchSchedule(b)
+        assertEquals(listOf("2026-10-05"), repo.getScheduleSnapshot().semester.holidayDates)
+        // 旧脚本或兜底数据不保留可能属于旧学期的日期。
+        repo.commitImport(a, "A", semester, listOf(course()), times)
+        assertTrue(repo.getScheduleSnapshot().semester.holidayDates.isEmpty())
     }
 
     @Test fun differentSemesterRequiresExplicitConfirmationAndRepeatedSwitchDoesNotChangeVersion() = runBlocking {
@@ -153,5 +171,28 @@ class ScheduleRepositoryTest {
         repeat(5) { repo.switchSchedule(a); repo.switchSchedule(b) }
         assertEquals(b, repo.getScheduleSnapshot().scheduleId)
         assertTrue(repo.getScheduleSnapshot().reminderVersion > before.reminderVersion)
+    }
+    @Test fun automaticImportKeepsCurrentScheduleAndPreservesTargetManualCourses() = runBlocking {
+        val target = repo.getScheduleSnapshot().scheduleId
+        repo.commitImport(target, "", semester, listOf(course()), times)
+        repo.setCoursesHidden(target, db.courseDao().getBySource(target, CourseEntity.SOURCE_IMPORT).map { it.id }, true)
+        repo.addManualCourse(target, course(CourseEntity.SOURCE_MANUAL).copy(name = "自定义课"))
+        val current = repo.createSchedule("当前查看")
+        repo.commitImport(target, "", semester, listOf(course()), times, activateTarget = false)
+        assertEquals(current, repo.getScheduleSnapshot().scheduleId)
+        val rows = db.courseDao().getBySource(target, CourseEntity.SOURCE_IMPORT)
+        assertTrue(rows.single().hidden)
+        assertEquals("自定义课", db.courseDao().getBySource(target, CourseEntity.SOURCE_MANUAL).single().name)
+    }
+
+    @Test fun retiredImportRollsBackDatabaseTransaction() = runBlocking {
+        val target = repo.getScheduleSnapshot().scheduleId
+        repo.commitImport(target, "", semester, listOf(course()), times)
+        var checks = 0
+        assertTrue(runCatching {
+            repo.commitImport(target, "", semester, listOf(course().copy(name = "迟到课")), times,
+                activateTarget = false, ensureCurrent = { if (++checks == 2) throw kotlinx.coroutines.CancellationException("logout") })
+        }.isFailure)
+        assertEquals("数学", repo.getScheduleSnapshot().courses.single().name)
     }
 }

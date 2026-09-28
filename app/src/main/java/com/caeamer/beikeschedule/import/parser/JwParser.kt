@@ -6,6 +6,7 @@ import com.caeamer.beikeschedule.model.SectionMap
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -69,17 +70,27 @@ object JwParser {
      * 教学周日历解析结果。
      * @param weekMondays 下标+1 = 教学周，值 = 该周周一（yyyy-MM-dd）
      * @param totalWeeks 学期总教学周数
+     * @param holidayDates 学校标记的逐日放假日期（yyyy-MM-dd），与教学周编号独立
      */
-    data class WeekCalendar(val weekMondays: List<String>, val totalWeeks: Int)
+    data class WeekCalendar(
+        val weekMondays: List<String>,
+        val totalWeeks: Int,
+        val holidayDates: List<String> = emptyList(),
+    )
 
     /**
-     * 解析导入脚本产出的统一周历 JSON：{"totalWeeks":18, "weeks":[{"zc":1,"monday":"2026-09-07"},...]}。
-     * weeks 为空或解析失败时 totalWeeks 回退 0，由上层决定是否保留手工配置。
+     * 解析导入脚本产出的统一周历 JSON：totalWeeks、weeks（zc/monday）和可选 holidayDates。
+     * weeks 为空时保留接口总周数；整个 JSON 解析失败时回退空日历和 0 周。
      */
     fun parseWeekCalendar(jsonText: String): WeekCalendar {
         val root = runCatching { json.parseToJsonElement(jsonText).jsonObject }.getOrNull()
             ?: return WeekCalendar(emptyList(), 0)
         val totalWeeks = root["totalWeeks"]?.jsonPrimitive?.intOrNull ?: 0
+        // 旧导入数据或逐周兜底没有此字段；异常条目不能影响教学周解析。
+        val holidayDates = (root["holidayDates"] as? JsonArray)?.mapNotNull { elem ->
+            val raw = (elem as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+            runCatching { java.time.LocalDate.parse(raw).toString() }.getOrNull()
+        }?.distinct()?.sorted() ?: emptyList()
         val weeks = root["weeks"]?.jsonArray?.mapNotNull { elem ->
             val obj = elem.jsonObject
             val zc = obj["zc"]?.jsonPrimitive?.intOrNull ?: return@mapNotNull null
@@ -102,7 +113,7 @@ object JwParser {
             if (lastMonday.isEmpty()) return WeekCalendar(emptyList(), totalWeeks)
             mondays += lastMonday
         }
-        return WeekCalendar(mondays, totalWeeks)
+        return WeekCalendar(mondays, totalWeeks, holidayDates)
     }
 
     private fun toCourse(obj: JsonObject): CourseEntity {

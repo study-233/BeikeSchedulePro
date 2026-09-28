@@ -1,112 +1,70 @@
-/**
- * 北科教务成绩+考试+学业进度抓取脚本。在已登录的 byyt 页面注入，同源 fetch 复用 SESSION。
- * grcjcx 为 JSON POST（与课表接口的 form 提交不同），getgpa/getXss 为 form POST，
- * queryXflbyq/queryBxkqk 为 JSON POST（参数依赖 getXss 的培养方案标识），
- * queryXsksByxhList 参数带 p 前缀（pxn/pxq/ppylx）。
- * 结果经 BeikeGrades 桥回传：send('onGradesResult', [gpa, grades, user, xsxx, sem, exams, xflbyq, bxkqk])。
- */
-(function (requestId) {
-    if (window.__beikeGradesRunning === requestId) return;
-    window.__beikeGradesRunning = requestId;
-
-    /**
-     * 回传桥消息。桥由平台按 origin 限定（WebViewCompat.addWebMessageListener，
-     * 只注入给 ustb.edu.cn 的页面），统一用 JSON 信封 {fn, args} 走 postMessage。
-     */
+/** 每个任务独立请求和回传；失败不会丢弃其他任务的结果。 */
+(function (requestId, task) {
+    var key = '__beikeAcademic_' + task;
+    if (window[key] === requestId) return;
+    window[key] = requestId;
     function send(fn, args) {
-        try {
-            window.BeikeGrades.postMessage(JSON.stringify({ fn: fn, args: args, requestId: requestId }));
-        } catch (e) { /* 桥不可用 */ }
+        window['Beike' + task].postMessage(JSON.stringify({ fn: fn, args: args, requestId: requestId }));
     }
-
-    /**
-     * JSON.parse 的统一入口：会话过期时教务会 302 到登录页并返回 200 的 HTML，
-     * 直接 JSON.parse 会把英文语法错误铺到中文界面。
-     */
-    function parseJson(text, hint) {
-        if (typeof text !== 'string' || text.trim().charAt(0) === '<') {
-            throw new Error('会话已过期，请重新登录教务系统后重试');
-        }
-        try {
-            return JSON.parse(text);
-        } catch (e) {
-            throw new Error((hint || '教务响应格式异常') + '，请重新登录后重试');
-        }
-    }
-
-    /** 共用的 fetch 选项：连接挂起时 fetch 可以永不 resolve，界面会一直停在"抓取中…"。 */
-    function fetchOpts(extra) {
-        return Object.assign({ credentials: 'same-origin', signal: AbortSignal.timeout(20000) }, extra);
-    }
-
-    function postForm(url, params) {
-        return fetch(url, fetchOpts({
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-            body: new URLSearchParams(params).toString()
-        })).then(function (r) {
-            if (!r.ok) throw new Error('HTTP ' + r.status); // 会话过期/5xx 时 text 是 HTML，显式报状态更可读
-            return r.text();
+    function post(url, body, json) {
+        return fetch(url, {
+            method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(20000),
+            headers: { 'Content-Type': json ? 'application/json;charset=UTF-8' : 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: json ? JSON.stringify(body) : new URLSearchParams(body || {}).toString()
+        }).then(window.BeikeAuth.read).then(function (text) {
+            var value;
+            try { value = JSON.parse(text); } catch (_) { throw new Error('教务响应格式异常，请重试'); }
+            if (value && value.code != null && ![0, 200, '0', '200'].includes(value.code)) {
+                throw new Error('教务接口返回异常，请稍后重试');
+            }
+            return text;
         });
     }
-
-    function postJson(url, body) {
-        return fetch(url, fetchOpts({
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json;charset=UTF-8' },
-            body: JSON.stringify(body)
-        })).then(function (r) {
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            return r.text();
+    var result = ['', '', '', '', '', '', '', ''];
+    function semester() {
+        return post('/component/querydangqianxnxq').then(function (text) {
+            result[4] = text;
+            var sem = JSON.parse(text);
+            if (!sem.XN || !sem.XQ) throw new Error('未获取到当前学期，请重新登录');
+            return sem;
         });
     }
-
-    /** 学业进度：getXss 取培养方案标识 → 并发查学分类别要求 + 毕业总进度；失败回退空串不阻塞成绩。 */
-    function fetchProgress(xn, xq) {
-        return postForm('/cjgl/cjzhtjcx/cjcx/getXss', {}).then(function (text) {
-            var xs = (parseJson(text, '培养方案标识解析失败').content || [])[0] || {};
-            var body = {
-                xh: xs.xh || '', pylx: xs.pylx || '1', nj: xs.nj || '',
-                jzxnxq: xn + xq, xjid: xs.xjid || '', fah: xs.fah || ''
-            };
-            var bxkqkBody = Object.assign({ sfcxxfj: '0' }, body);
+    var job;
+    if (task === 'GPA') {
+        job = post('/cjgl/grcjcx/getgpa').then(function (text) { result[0] = text; });
+    } else if (task === 'GRADES') {
+        job = post('/user/me').catch(function (error) {
+            if (error.beikeAuthRequired) throw error;
+            return '{}';
+        }).then(function (text) {
+            var me = JSON.parse(text);
+            return post('/cjgl/grcjcx/grcjcx', {
+                xn: null, xq: null, kcmc: null, cxbj: '-1', pylx: me.pylx || '1',
+                current: 1, pageSize: 500, xscjlb: null, sffx: null, yhdm: me.yhdm || null
+            }, true);
+        }).then(function (text) { result[1] = text; });
+    } else if (task === 'STUDENT') {
+        job = Promise.all([post('/user/me'), post('/UserManager/queryxsxx')]).then(function (texts) {
+            result[2] = texts[0]; result[3] = texts[1];
+        });
+    } else if (task === 'EXAMS') {
+        job = semester().then(function (sem) {
+            return post('/kscxtj/queryXsksByxhList', { pxn: sem.XN, pxq: sem.XQ, ppylx: '1', pageNum: 1, pageSize: 100 });
+        }).then(function (text) { result[5] = text; });
+    } else if (task === 'PROGRESS') {
+        job = Promise.all([semester(), post('/cjgl/cjzhtjcx/cjcx/getXss')]).then(function (values) {
+            var xs = (JSON.parse(values[1]).content || [])[0];
+            if (!xs) throw new Error('未获取到培养方案信息');
+            var body = { xh: xs.xh, pylx: xs.pylx || '1', nj: xs.nj, jzxnxq: values[0].XN + values[0].XQ, xjid: xs.xjid, fah: xs.fah };
             return Promise.all([
-                postJson('/cjgl/cjzhtjcx/cjcx/queryXflbyq', body),
-                postJson('/cjgl/cjzhtjcx/cjcx/queryBxkqk', bxkqkBody)
+                post('/cjgl/cjzhtjcx/cjcx/queryXflbyq', body, true),
+                post('/cjgl/cjzhtjcx/cjcx/queryBxkqk', Object.assign({ sfcxxfj: '0' }, body), true)
             ]);
-        }).catch(function () { return ['', '']; });
+        }).then(function (texts) { result[6] = texts[0]; result[7] = texts[1]; });
+    } else {
+        job = Promise.reject(new Error('未知教务任务'));
     }
-
-    Promise.all([
-        postForm('/component/querydangqianxnxq', {}),
-        // /user/me 只用来取 pylx/yhdm 两个**可有可无**的参数（下面都有 || 兜底），
-        // 它失败不该让整次抓取失败（此前会打进外层 catch，用户看到"抓取失败：HTTP 5xx"）
-        postForm('/user/me', {}).catch(function () { return ''; })
-    ]).then(function (rs) {
-        var sem = parseJson(rs[0], '当前学期解析失败');
-        if (!sem || !sem.XN) throw new Error('未获取到当前学期，请确认已登录');
-        var me = {};
-        try { me = JSON.parse(rs[1]); } catch (e) { /* 匿名兜底 */ }
-        return Promise.all([
-            postForm('/cjgl/grcjcx/getgpa', {}),
-            postJson('/cjgl/grcjcx/grcjcx', {
-                xn: null, xq: null, kcmc: null, cxbj: '-1',
-                pylx: me.pylx || '1',
-                current: 1, pageSize: 500,
-                xscjlb: null, sffx: null, yhdm: me.yhdm || null
-            }),
-            postForm('/UserManager/queryxsxx', {}).catch(function () { return ''; }),
-            postForm('/kscxtj/queryXsksByxhList', {
-                pxn: sem.XN, pxq: sem.XQ, ppylx: '1', pageNum: 1, pageSize: 100
-            }).catch(function () { return ''; }),
-            fetchProgress(sem.XN, sem.XQ)
-        ]).then(function (all) {
-            if (window.__beikeGradesRunning === requestId) window.__beikeGradesRunning = null;
-            // all[0]=getgpa, all[1]=grcjcx, all[2]=queryxsxx, all[3]=考试, all[4]=[xflbyq, bxkqk]
-            send('onGradesResult', [all[0], all[1], rs[1], all[2], rs[0], all[3], all[4][0], all[4][1]]);
-        });
-    }).catch(function (e) {
-        if (window.__beikeGradesRunning === requestId) window.__beikeGradesRunning = null;
-        send('onError', [String(e)]);
-    });
-})('__BEIKE_REQUEST_ID__');
+    job.then(function () { send('onGradesResult', result); })
+        .catch(function (error) { send(error.beikeAuthRequired ? 'onAuthRequired' : 'onError', [String(error)]); })
+        .finally(function () { if (window[key] === requestId) window[key] = null; });
+})('__BEIKE_REQUEST_ID__', '__BEIKE_TASK__');

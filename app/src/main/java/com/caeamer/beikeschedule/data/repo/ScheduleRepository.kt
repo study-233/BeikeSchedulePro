@@ -201,7 +201,10 @@ class ScheduleRepository internal constructor(
         targetId: Long?, name: String, semester: SettingsStore.SemesterConfig,
         courses: List<CourseEntity>, sectionTimes: List<SectionTimeEntity>,
         allowDifferentSemester: Boolean = false,
+        activateTarget: Boolean = true,
+        ensureCurrent: () -> Unit = {},
     ): Long = write {
+        ensureCurrent()
         val target = targetId?.let { requireSchedule(it) }
         require(target == null || !isDifferentSemester(target, semester) || allowDifferentSemester) {
             "导入学期与目标课表不同，请确认后重试"
@@ -219,7 +222,8 @@ class ScheduleRepository internal constructor(
         sectionTimeDao.insertAll(sectionTimes.map { it.copy(scheduleId = id) })
         courseDao.deleteBySource(id, CourseEntity.SOURCE_SAMPLE)
         scheduleDao.update(requireSchedule(id).withSemester(semester))
-        activate(id, invalidate = true)
+        if (activateTarget) activate(id, invalidate = true) else invalidateIfCurrent(id)
+        ensureCurrent()
         id
     }
 

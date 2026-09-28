@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CourseEntity::class, SectionTimeEntity::class, GradeEntity::class, ExamEntity::class, TodoEntity::class, ScheduleEntity::class, ScheduleStateEntity::class],
-    version = 7,
+    entities = [CourseEntity::class, SectionTimeEntity::class, GradeEntity::class, ExamEntity::class, TodoEntity::class, ScheduleEntity::class, ScheduleStateEntity::class, NoticeEntity::class, NoticeFeedEntity::class],
+    version = 9,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -20,6 +20,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun gradeDao(): GradeDao
     abstract fun examDao(): ExamDao
     abstract fun todoDao(): TodoDao
+    abstract fun noticeDao(): NoticeDao
 
     companion object {
         /** v1 → v2：新增 grade 表（课程/节次数据原样保留）。 */
@@ -102,6 +103,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v7 → v8：逐日放假标记按课表保存，已有课表等待重新导入补齐。 */
+        val MIGRATE_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE schedule ADD COLUMN holidayDates TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        val MIGRATE_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS notice (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, publishedAt TEXT NOT NULL, external INTEGER NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS notice_feed (id INTEGER NOT NULL PRIMARY KEY, page INTEGER NOT NULL, nextPage INTEGER NOT NULL, hasNext INTEGER NOT NULL, total INTEGER NOT NULL, fetchedAt INTEGER NOT NULL)")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -112,7 +127,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "beike_schedule.db",
                 )
-                    .addMigrations(MIGRATE_1_2, MIGRATE_2_3, MIGRATE_3_4, MIGRATE_4_5, MIGRATE_5_6, MIGRATE_6_7)
+                    .addMigrations(MIGRATE_1_2, MIGRATE_2_3, MIGRATE_3_4, MIGRATE_4_5, MIGRATE_5_6, MIGRATE_6_7, MIGRATE_7_8, MIGRATE_8_9)
                     // 迁移失败的兜底保险丝。
                     //
                     // **只兜"找不到迁移路径"这一种情况**（Room 的 fallbackToDestructiveMigration

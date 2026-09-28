@@ -42,6 +42,7 @@ fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel, widgetOpenRequest:
             onWidgetConsumed: () -> Unit, onImport: () -> Unit) {
     val schedule: ScheduleViewModel = viewModel()
     val settings: SettingsViewModel = viewModel()
+    val academicSession: com.caeamer.beikeschedule.import.AcademicSessionViewModel = viewModel()
     val state by schedule.uiState.collectAsStateWithLifecycle()
     val savedAppearance by appearanceViewModel.appearance.collectAsStateWithLifecycle()
     val appearance = savedAppearance ?: ScheduleAppearance()
@@ -50,7 +51,6 @@ fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel, widgetOpenRequest:
     var selectedCourseKey by rememberSaveable { mutableStateOf<String?>(null) }
     var editCourseId by rememberSaveable { mutableStateOf<Long?>(null) }
     var settingsVisit by rememberSaveable { mutableIntStateOf(0) }
-    var academicRequest by rememberSaveable { mutableIntStateOf(0) }
     val main = MainPage.restore(mainId)
     val page = SettingsPage.restore(pages.lastOrNull()?.substringBefore('@'))
     val holder = rememberSaveableStateHolder()
@@ -143,7 +143,8 @@ fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel, widgetOpenRequest:
                                         // 保存回调可能晚于小组件跳转；只允许退出发起操作的那一页。
                                         val closePage = { if (pages.lastOrNull() == visible) back() }
                                         Surface(Modifier.fillMaxSize().navigationBarsPadding(), color = MaterialTheme.colorScheme.background) {
-                                            if (secondary == SettingsPage.STUDENT) StudentProfileScreen(settings, closePage)
+                                            if (secondary == SettingsPage.ACCOUNT) com.caeamer.beikeschedule.ui.profile.AcademicSyncScreen(closePage, onImport)
+                                            else if (secondary == SettingsPage.STUDENT) StudentProfileScreen(settings, closePage)
                                             else ScheduleSettingsScreen(secondary, schedule, appearanceViewModel, closePage, navigate)
                                         }
                                     } else {
@@ -153,7 +154,7 @@ fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel, widgetOpenRequest:
                                             Modifier.background(MaterialTheme.colorScheme.background) else Modifier)) {
                                             when (visibleMain) {
                                                 MainPage.SCHEDULE -> ScheduleScreen(
-                                                    onImportClick = onImport,
+                                                    onImportClick = { academicSession.startSync(); navigate(SettingsPage.ACCOUNT) },
                                                     onSettings = { navigate(SettingsPage.SCHEDULE) },
                                                     onManage = { navigate(SettingsPage.MANAGE) },
                                                     onCourseDetail = { selected, week ->
@@ -168,17 +169,11 @@ fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel, widgetOpenRequest:
                                                 )
                                                 MainPage.CAMPUS -> {
                                                     val grades: GradesViewModel = viewModel()
-                                                    LaunchedEffect(academicRequest) {
-                                                        if (academicRequest > 0) {
-                                                            grades.openAcademicData()
-                                                            academicRequest = 0
-                                                        }
-                                                    }
                                                     GradesScreen(grades)
                                                 }
                                                 MainPage.PROFILE -> ProfileScreen(
                                                     navigate,
-                                                    onAcademic = { academicRequest++; mainId = MainPage.CAMPUS.id },
+                                                    onAcademic = { navigate(SettingsPage.ACCOUNT) },
                                                     onClearSample = schedule::clearSampleData,
                                                     hasSample = state.hasSample,
                                                     viewModel = settings,

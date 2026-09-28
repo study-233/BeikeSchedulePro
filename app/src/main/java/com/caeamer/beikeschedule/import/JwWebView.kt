@@ -22,28 +22,6 @@ import androidx.webkit.WebViewFeature
 private const val JW_HOME = "https://byyt.ustb.edu.cn"
 private const val MAIN_PAGE_MARK = "/authentication/main"
 
-/** 只在教务首页找学校自己的入口，由页面生成 SSO 跳转参数，不拼接认证 URL。 */
-private const val OPEN_SCHOOL_AUTH_JS = """
-(function () {
-  if (window.__bkAuthSearchStarted) return;
-  window.__bkAuthSearchStarted = true;
-  var until = Date.now() + 10000;
-  var timer = setInterval(function () {
-    var nodes = document.querySelectorAll('a, button, [role="button"], input[type="button"]');
-    for (var i = 0; i < nodes.length; i++) {
-      var node = nodes[i];
-      var label = (node.innerText || node.value || '').replace(/\s/g, '');
-      if (label.indexOf('统一身份认证登录') < 0 || !node.getClientRects().length) continue;
-      clearInterval(timer);
-      if (node.tagName === 'A') node.removeAttribute('target');
-      node.click();
-      return;
-    }
-    if (Date.now() >= until) clearInterval(timer);
-  }, 250);
-})();
-"""
-
 /**
  * 学校二维码实际上在 sis.ustb.edu.cn 的 iframe 中，网页靠 /connect/state 长轮询
  * 收到授权结果。学校脚本在请求报错时会延迟执行 location.reload()，切到微信期间
@@ -314,6 +292,8 @@ fun JwWebView(
     onPageError: (String) -> Unit = {},
     onPageProgress: (Int) -> Unit = {},
     onAuthPageChanged: (Boolean) -> Unit = {},
+    onOpeningAuth: () -> Unit = {},
+    onAuthFallback: (String) -> Unit = {},
 ) {
     val bridges by rememberUpdatedState(additionalBridges + (bridgeName to bridge))
     val mainPageCallback by rememberUpdatedState(onMainPage)
@@ -321,6 +301,8 @@ fun JwWebView(
     val errorCallback by rememberUpdatedState(onPageError)
     val progressCallback by rememberUpdatedState(onPageProgress)
     val authCallback by rememberUpdatedState(onAuthPageChanged)
+    val openingAuthCallback by rememberUpdatedState(onOpeningAuth)
+    val authFallbackCallback by rememberUpdatedState(onAuthFallback)
     val createdCallback by rememberUpdatedState(onCreated)
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -372,6 +354,24 @@ fun JwWebView(
             }
             WebView(it).apply {
                 currentView[0] = this
+                var navigationId = 0L
+                var checkedNavigation = -1L
+                var authSearchNavigation: Long? = null
+                var homeFallbackUsed = false
+                fun openAuthentication(view: WebView) {
+                    if (authSearchNavigation == navigationId) return
+                    openingAuthCallback()
+                    if (authSearchNavigation != null) {
+                        authFallbackCallback("自动认证未完成，请在学校页面继续登录，或点击重新加载")
+                    } else if (isMainPageUrl(view.url.orEmpty()) && !homeFallbackUsed) {
+                        homeFallbackUsed = true
+                        view.loadUrl(JW_HOME)
+                    } else {
+                        authSearchNavigation = navigationId
+                        view.evaluateJavascript(loadAssetScript(context, "import/jw_open_auth.js")
+                            .replace("__BEIKE_NAVIGATION_ID__", navigationId.toString()), null)
+                    }
+                }
                 // 教务登录页 PC 布局加载慢，且默认白背景刺眼；设淡暖色底让加载过程更柔和
                 setBackgroundColor(android.graphics.Color.parseColor("#F5EFEF"))
                 settings.javaScriptEnabled = true
@@ -402,6 +402,25 @@ fun JwWebView(
                         val host = sourceOrigin.host?.lowercase() ?: return@addWebMessageListener
                         if (!isJwHost(host)) return@addWebMessageListener
                         message.data?.let { payload -> bridges[name]?.dispatch(payload) }
+                    }
+                }
+                WebViewCompat.addWebMessageListener(this, "BeikeSession", setOf(JW_HOME)) { view, message, origin, isMainFrame, _ ->
+                    if (currentView[0] !== view || !isMainFrame || origin.scheme != "https" ||
+                        origin.host != "byyt.ustb.edu.cn" || !isByytUrl(view.url.orEmpty())) return@addWebMessageListener
+                    val envelope = runCatching { org.json.JSONObject(message.data.orEmpty()) }.getOrNull()
+                        ?: return@addWebMessageListener
+                    if (envelope.optString("requestId").toLongOrNull() != navigationId) return@addWebMessageListener
+                    when (envelope.optString("fn")) {
+                        "onSessionReady" -> {
+                            if (isMainPageUrl(view.url.orEmpty())) {
+                                CookieManager.getInstance().flush()
+                                mainPageCallback()
+                            } else view.loadUrl(JW_HOME + MAIN_PAGE_MARK)
+                        }
+                        "onAuthRequired" -> openAuthentication(view)
+                        "onAuthOpening" -> openingAuthCallback()
+                        "onAuthEntryMissing" -> authFallbackCallback("未找到统一身份认证入口，请在学校页面继续登录，或点击重新加载")
+                        "onError" -> errorCallback("检查登录会话失败，请检查网络后重试，已有数据已保留")
                     }
                 }
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -457,6 +476,7 @@ fun JwWebView(
 
                     override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                         if (currentView[0] !== view) return
+                        navigationId++
                         if (isSsoLoginPageUrl(url)) {
                             pendingCompletionUrl[0] = null
                             completionRetryCount[0] = 0
@@ -468,17 +488,17 @@ fun JwWebView(
                     }
 
                     override fun onPageFinished(view: WebView, url: String) {
-                        if (currentView[0] !== view) return
+                        if (currentView[0] !== view || view.url != url) return
                         // 兜底注入（脚本幂等），覆盖 onPageStarted 时机过晚的情况
                         if (isByytUrl(url)) view.evaluateJavascript(PAGE_FIX_JS, null)
                         if (isAuthPageUrl(url)) view.evaluateJavascript(SMS_CAPTCHA_VIEWPORT_JS, null)
                         authCallback(isAuthPageUrl(url))
-                        if (isByytLandingUrl(url)) view.evaluateJavascript(OPEN_SCHOOL_AUTH_JS, null)
-                        // 主页面判定改为 host + path **精确**匹配：
-                        // 此前是 url.contains("/authentication/main")，任意域名下含该路径的
-                        // URL（如 https://evil.example/authentication/main）都会触发抓取脚本注入。
-                        if (isMainPageUrl(url)) {
-                            view.post { if (currentView[0] === view && isMainPageUrl(view.url.orEmpty())) mainPageCallback() }
+                        // URL 到达主页不代表仍已登录；每个文档仅探测一次真实会话。
+                        if (isByytUrl(url) && checkedNavigation != navigationId) {
+                            checkedNavigation = navigationId
+                            view.evaluateJavascript(loadAssetScript(context, "import/jw_auth.js") + "\n" +
+                                loadAssetScript(context, "import/jw_session.js")
+                                    .replace("__BEIKE_NAVIGATION_ID__", navigationId.toString()), null)
                         }
                     }
 
@@ -487,6 +507,7 @@ fun JwWebView(
                         request: android.webkit.WebResourceRequest,
                         error: android.webkit.WebResourceError,
                     ) {
+                        if (currentView[0] !== view) return
                         if (request.isForMainFrame) {
                             if (isSchoolQrCompletionUrl(request.url) &&
                                 error.description.toString().contains("ERR_CONNECTION_ABORTED") &&
@@ -512,8 +533,12 @@ fun JwWebView(
                         request: android.webkit.WebResourceRequest,
                         errorResponse: android.webkit.WebResourceResponse,
                     ) {
+                        if (currentView[0] !== view) return
                         if (request.isForMainFrame) {
-                            errorCallback("页面返回错误：HTTP ${errorResponse.statusCode}")
+                            if (errorResponse.statusCode == 401 && isByytUrl(request.url.toString())) {
+                                checkedNavigation = navigationId
+                                openAuthentication(view)
+                            } else errorCallback("页面返回错误：HTTP ${errorResponse.statusCode}")
                         }
                     }
 
@@ -523,15 +548,15 @@ fun JwWebView(
                         error: android.net.http.SslError,
                     ) {
                         handler.cancel()
-                        errorCallback("SSL 证书校验失败（${error.primaryError}），请检查网络/VPN")
+                        if (currentView[0] === view) errorCallback("SSL 证书校验失败（${error.primaryError}），请检查网络/VPN")
                     }
                 }
                 webChromeClient = object : android.webkit.WebChromeClient() {
                     override fun onProgressChanged(view: WebView, newProgress: Int) {
-                        progressCallback(newProgress)
+                        if (currentView[0] === view) progressCallback(newProgress)
                     }
                 }
-                loadUrl(JW_HOME)
+                loadUrl(JW_HOME + MAIN_PAGE_MARK)
                 createdCallback(this)
             }
         },
@@ -553,6 +578,7 @@ fun JwWebView(
             if (currentView[0] === view) currentView[0] = null
             pendingCompletionUrl[0] = null
             bridges.keys.forEach { name -> runCatching { WebViewCompat.removeWebMessageListener(view, name) } }
+            runCatching { WebViewCompat.removeWebMessageListener(view, "BeikeSession") }
             runCatching { view.stopLoading() }
             runCatching { view.loadUrl("about:blank") }
             runCatching { view.destroy() }
@@ -570,12 +596,6 @@ private fun isByytUrl(url: String): Boolean =
         ?.takeIf { it.scheme == "https" }
         ?.host?.lowercase()
         ?.let { it == "byyt.ustb.edu.cn" } == true
-
-private fun isByytLandingUrl(url: String): Boolean {
-    if (!isByytUrl(url)) return false
-    val path = runCatching { android.net.Uri.parse(url).path }.getOrNull()
-    return path.isNullOrEmpty() || path == "/"
-}
 
 private fun isAuthPageUrl(url: String): Boolean =
     runCatching { android.net.Uri.parse(url) }.getOrNull()
@@ -598,7 +618,7 @@ private fun isSchoolQrCompletionUrl(uri: android.net.Uri): Boolean = runCatching
 }.getOrDefault(false)
 
 /**
- * 是否为教务主页面：**host 必须在白名单内**且 path 精确等于 [MAIN_PAGE_MARK]。
+ * 是否为教务主页面：host 必须为教务站点且 path 精确等于 [MAIN_PAGE_MARK]。
  *
  * 此前是 `url.contains(MAIN_PAGE_MARK)`：任何域名下含该路径的 URL（含查询串伪造）
  * 都会触发抓取脚本注入，而抓取脚本会调用 @JavascriptInterface 桥向本地库写入数据。
@@ -607,7 +627,7 @@ private fun isMainPageUrl(url: String): Boolean {
     val uri = runCatching { android.net.Uri.parse(url) }.getOrNull() ?: return false
     if (uri.scheme != "https") return false
     val host = uri.host?.lowercase() ?: return false
-    if (!isJwHost(host)) return false
+    if (host != "byyt.ustb.edu.cn") return false
     return uri.path == MAIN_PAGE_MARK
 }
 

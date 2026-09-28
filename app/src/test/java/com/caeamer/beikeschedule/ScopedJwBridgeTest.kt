@@ -4,6 +4,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ScopedJwBridgeTest {
+    @Test fun `认证失效事件只处理一次 旧成功错误和失效事件不能进入新请求`() {
+        val requests = AcademicRequests()
+        requests.beginLogin(false)
+        val id = requests.launch(AcademicTask.GRADES, 0)!!
+        var recoveries = 0
+        val bridge = ScopedJwBridge(
+            accepts = { requests.accepts(AcademicTask.GRADES, it) },
+            onAuthRequired = { recoveries++; requests.pauseForAuthentication(100) },
+            delegate = { error("过期回调不得进入数据桥") },
+        )
+        val event = """{"requestId":"$id","fn":"onAuthRequired","args":[]}"""
+        bridge.dispatch(event)
+        bridge.dispatch(event)
+        requests.launch(AcademicTask.GRADES, 1000)
+        bridge.dispatch("""{"requestId":"$id","fn":"onGradesResult","args":[]}""")
+        bridge.dispatch("""{"requestId":"$id","fn":"onError","args":["late"]}""")
+        assertEquals(1, recoveries)
+    }
+
     @Test fun `只接受本次请求的完整信封 重复取消和旧脚本均被隔离`() {
         val requests = AcademicRequests()
         requests.beginLogin(false)

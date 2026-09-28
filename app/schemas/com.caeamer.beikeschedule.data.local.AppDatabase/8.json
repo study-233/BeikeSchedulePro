@@ -1,0 +1,532 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 8,
+    "identityHash": "ed3a993744e9427284374a1b82a9ea7d",
+    "entities": [
+      {
+        "tableName": "course",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `taskId` TEXT NOT NULL, `name` TEXT NOT NULL, `teacher` TEXT NOT NULL, `location` TEXT NOT NULL, `dayOfWeek` INTEGER NOT NULL, `startSection` INTEGER NOT NULL, `endSection` INTEGER NOT NULL, `weekBitmap` TEXT NOT NULL, `colorIndex` INTEGER NOT NULL, `source` INTEGER NOT NULL, `hidden` INTEGER NOT NULL, `scheduleId` INTEGER NOT NULL DEFAULT 1)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "taskId",
+            "columnName": "taskId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "teacher",
+            "columnName": "teacher",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "location",
+            "columnName": "location",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dayOfWeek",
+            "columnName": "dayOfWeek",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startSection",
+            "columnName": "startSection",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endSection",
+            "columnName": "endSection",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weekBitmap",
+            "columnName": "weekBitmap",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "colorIndex",
+            "columnName": "colorIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hidden",
+            "columnName": "hidden",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleId",
+            "columnName": "scheduleId",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_course_scheduleId",
+            "unique": false,
+            "columnNames": [
+              "scheduleId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_course_scheduleId` ON `${TABLE_NAME}` (`scheduleId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "section_time",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`section` INTEGER NOT NULL, `startTime` TEXT NOT NULL, `endTime` TEXT NOT NULL, `scheduleId` INTEGER NOT NULL, PRIMARY KEY(`scheduleId`, `section`))",
+        "fields": [
+          {
+            "fieldPath": "section",
+            "columnName": "section",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startTime",
+            "columnName": "startTime",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endTime",
+            "columnName": "endTime",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleId",
+            "columnName": "scheduleId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "scheduleId",
+            "section"
+          ]
+        }
+      },
+      {
+        "tableName": "grade",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `kcdm` TEXT NOT NULL, `kcmc` TEXT NOT NULL, `xnxq` TEXT NOT NULL, `xnxqmc` TEXT NOT NULL, `kcxz` TEXT NOT NULL, `kclb` TEXT NOT NULL, `xf` REAL NOT NULL, `zzcj` TEXT NOT NULL, `bkcx` TEXT NOT NULL, `yxmc` TEXT NOT NULL, `sffx` INTEGER NOT NULL, `pm` TEXT NOT NULL, `zrs` TEXT NOT NULL, `khfs` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kcdm",
+            "columnName": "kcdm",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kcmc",
+            "columnName": "kcmc",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xnxq",
+            "columnName": "xnxq",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xnxqmc",
+            "columnName": "xnxqmc",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kcxz",
+            "columnName": "kcxz",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kclb",
+            "columnName": "kclb",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xf",
+            "columnName": "xf",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "zzcj",
+            "columnName": "zzcj",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bkcx",
+            "columnName": "bkcx",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yxmc",
+            "columnName": "yxmc",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sffx",
+            "columnName": "sffx",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pm",
+            "columnName": "pm",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "zrs",
+            "columnName": "zrs",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "khfs",
+            "columnName": "khfs",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "exam",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `kcdm` TEXT NOT NULL, `kcmc` TEXT NOT NULL, `kslx` TEXT NOT NULL, `kssjms` TEXT NOT NULL, `ksrq` TEXT NOT NULL, `kssj` TEXT NOT NULL, `jssj` TEXT NOT NULL, `cdmc` TEXT NOT NULL, `zwh` TEXT NOT NULL, `jkjsbz` TEXT NOT NULL, `kkyxmc` TEXT NOT NULL, `xnxq` TEXT NOT NULL, `source` INTEGER NOT NULL DEFAULT 0)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kcdm",
+            "columnName": "kcdm",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kcmc",
+            "columnName": "kcmc",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kslx",
+            "columnName": "kslx",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kssjms",
+            "columnName": "kssjms",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ksrq",
+            "columnName": "ksrq",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kssj",
+            "columnName": "kssj",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "jssj",
+            "columnName": "jssj",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cdmc",
+            "columnName": "cdmc",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "zwh",
+            "columnName": "zwh",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "jkjsbz",
+            "columnName": "jkjsbz",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kkyxmc",
+            "columnName": "kkyxmc",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xnxq",
+            "columnName": "xnxq",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "todo",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `note` TEXT NOT NULL, `repeatMode` INTEGER NOT NULL, `weekdays` TEXT NOT NULL, `date` TEXT NOT NULL, `time` TEXT NOT NULL, `remindMinutes` INTEGER NOT NULL, `colorIndex` INTEGER NOT NULL, `lastDoneDate` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "repeatMode",
+            "columnName": "repeatMode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weekdays",
+            "columnName": "weekdays",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "date",
+            "columnName": "date",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remindMinutes",
+            "columnName": "remindMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "colorIndex",
+            "columnName": "colorIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastDoneDate",
+            "columnName": "lastDoneDate",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "schedule",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `xn` TEXT NOT NULL, `xq` TEXT NOT NULL, `semesterName` TEXT NOT NULL, `firstMonday` TEXT NOT NULL, `totalWeeks` INTEGER NOT NULL, `weekMondays` TEXT NOT NULL, `holidayDates` TEXT NOT NULL DEFAULT '')",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xn",
+            "columnName": "xn",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "xq",
+            "columnName": "xq",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "semesterName",
+            "columnName": "semesterName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstMonday",
+            "columnName": "firstMonday",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalWeeks",
+            "columnName": "totalWeeks",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weekMondays",
+            "columnName": "weekMondays",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "holidayDates",
+            "columnName": "holidayDates",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "schedule_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `activeScheduleId` INTEGER NOT NULL, `reminderVersion` INTEGER NOT NULL, `initialized` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activeScheduleId",
+            "columnName": "activeScheduleId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reminderVersion",
+            "columnName": "reminderVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initialized",
+            "columnName": "initialized",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ed3a993744e9427284374a1b82a9ea7d')"
+    ]
+  }
+}

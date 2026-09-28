@@ -449,19 +449,25 @@ private fun todayStatusLine(state: ScheduleUiState, today: LocalDate): String {
 @Composable
 private fun DateRow(week: Int, semester: SettingsStore.SemesterConfig, today: LocalDate, days: List<Int>) {
     val monday = remember(semester, week) { WeekResolver.weekMonday(semester, week) }
+    val holidayDates = remember(semester.holidayDates) { semester.holidayDates.toSet() }
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Spacer(Modifier.width(SECTION_COL_WIDTH))
         days.forEach { day ->
             val date = monday?.plusDays((day - 1).toLong())
             val isToday = date == today
+            val isHoliday = date != null && date.toString() in holidayDates
             Column(
                 modifier = Modifier.weight(1f).padding(horizontal = 1.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // 今天：主题色实心胶囊 + 白字，一眼定位
+                // 今天优先高亮；学校标记的放假日期使用浅色背景。
                 Column(
                     modifier = Modifier.background(
-                        if (isToday) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        when {
+                            isToday -> MaterialTheme.colorScheme.primary
+                            isHoliday -> MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+                            else -> Color.Transparent
+                        },
                         RoundedCornerShape(10.dp),
                     ).padding(horizontal = 8.dp, vertical = 2.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,

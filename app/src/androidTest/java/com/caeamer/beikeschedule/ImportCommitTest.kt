@@ -41,7 +41,8 @@ class ImportCommitTest {
         instrumentation.runOnMainSync {
             vm = ImportViewModel(app, repo, after)
             store.put("import", vm)
-            vm.onFetchResult("""{"XN":"2026-2027","XQ":"1","XNXQ":"秋季"}""", "1", courses, sections, "{}", "{}")
+            vm.onFetchResult("""{"XN":"2026-2027","XQ":"1","XNXQ":"秋季"}""", "1", courses, sections, "{}",
+                """{"totalWeeks":18,"weeks":[{"zc":1,"monday":"2026-09-07"}],"holidayDates":["2026-09-12"]}""")
             vm.setName("导入测试")
         }
         assertTrue(vm.state.value is ImportUiState.Preview)
@@ -81,6 +82,7 @@ class ImportCommitTest {
         instrumentation.runOnMainSync { vm.confirmImport() }
         withTimeout(5000) { vm.state.first { it is ImportUiState.Done } }
         assertEquals(target, repo.getScheduleSnapshot().scheduleId)
+        assertEquals(listOf("2026-09-12"), repo.getScheduleSnapshot().semester.holidayDates)
         assertFalse(repo.getScheduleSnapshot().courses.isEmpty())
     }
 }

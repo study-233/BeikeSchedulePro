@@ -19,6 +19,16 @@
 | 字段命名 | form 系接口字段多为大写（XN/XQ/KCMC），JSON 系接口小写（kcmc/xf）；同一数据两种接口字段名不同 |
 | 页面规律 | 功能页 HTML 尾部引 `/pub/<模块>/...js` 与 `/component/inco/...js`，**数据接口路径藏在 JS 里**；表格列定义 JS（`*Column*.js`）= 响应字段名的权威来源 |
 
+### App 会话检查与登录续接
+
+用户主动刷新时，WebView 优先访问 `/authentication/main`，在教务主框架中以同源 `POST /user/me`（空表单、`cache: no-store`）验证已有会话，再启动数据任务。沿用现有裸用户对象的 `yhdm` / `xh` 字段确认身份，不将探测返回的个人信息传回原生层。
+
+已展示学校统一认证按钮的登录落地页也可直接进入认证；识别不限定根路径。学校按钮负责生成 SSO 参数，App 不拼接或持久化认证链接。认证成功后仍通过真实会话检查才启动同步。
+
+注入脚本共用 `jw_auth.js` 区分明确的认证失效（401、已知登录重定向、带登录标志的 HTML）和普通服务/网络错误。失效事件携带原请求标识，宿主最多自动续接一次，保存剩余网络预算并拒绝旧回调；普通 403、5xx、未知 HTML 不作为过期处理。会话检查阶段上限 20 秒、登录按钮搜索上限 10 秒，用户操作认证不计入任务网络预算。
+
+以上为基于现有接口文档的客户端调整，未访问学校服务验证；需按 `docs/UNIFIED_SYNC_ACCEPTANCE.md` 检查实际登录跳转与冷启动会话复用。
+
 ## 1. 当前学期与校历
 
 | 接口 | 方式/参数 | 响应 | 状态 |
@@ -31,6 +41,24 @@
 | `/component/querydangqianzc` | POST form | 当前教学周（假期返回空） | 📝 |
 
 **教学周≠日期周**：长假周（国庆）不占教学周序号，一切周映射以 `Xiaoli/queryMonthList` 为准。
+
+**逐日放假标记（2026-09-28 用户提供响应核对）**：`xlList` 的 `MON/TUES/WED/THUR/FRI/SAT/SUN`
+是日期，对应的 `MON1/TUES1/WED1/THUR1/FRI1/SAT1/SUN1` 为逐日标记（字符串 `"1"` 放假、`"0"` 非放假）。
+同一天在 `monlist[].dszlist[].dstlist[]` 中的 `sffj` 与之对应，月历的年月来自 `yy/mm`，日来自 `rq`。
+响应中 2026-09-25 的 `FRI1="1"`，2026-10-05～07 的 `MON1/TUES1/WED1="1"`，与用户提供的粉色日期一致；
+普通周末也由接口标记，不能自行用星期或国家节假日推算。这里依据响应及用户截图对应关系接入，未取得网页着色脚本。
+
+App 仍按当前学期的 `MON` 和教学周 `ZC` 提取周映射，另将对应 `*1=1` 的日期去重保存为 `holidayDates`；
+`ZC=99` 的日期不会新增课表周。日期栏只标记当前显示周内的命中日期，今天高亮优先，不改变课程或提醒排期。
+旧数据或逐周兜底没有逐日标记时不标色；已有课表升级后需重新导入才能补齐。
+原响应的月历对象含用户标识，不整份入库；仅保留无个人信息的校历节选作为测试样本：
+`app/src/test/resources/queryMonthList-2026-2027-1-excerpt.json`（第 1～4 教学周及国庆跳周）。
+
+源码验证参考：`node --test app/src/test/js/jw_import.test.cjs` 使用内置 Node 测试模块模拟接口，
+不访问学校服务；Gradle 的 `testDebugUnitTest` 覆盖 Kotlin 解析和配置草稿。
+数据库版本升至 8 后需由开发者构建导出 `app/schemas/com.caeamer.beikeschedule.data.local.AppDatabase/8.json`，
+并运行 `HolidayCalendarMigrationTest`（7→8、5→8）、`ScheduleRepositoryTest` 和 `ImportCommitTest`。
+人工检查第 3/4 教学周、今天与放假重合、隐藏周末、明暗主题及多课表切换；以上检查不由源码编辑任务执行。
 
 ## 2. 课表
 
@@ -176,3 +204,17 @@ list 字段（权威来源：列定义 JS `/pub/gly/ksgl/cxtj/XskscxByXhColumn-*
 - 站点页面上的"全天 / 上午 / 下午 / 晚上"筛选是同一份数据的界面分组，接口没有对应的日期或半天参数：
   **只能查"今天"**。App 因此在页面顶部明示"今天 · 更新时间"，并把已结束的时段淡化。
 - 站点会在本地存储里放 `csrkDate` 版本号，版本变化时清空 `csrkKey` 重新拉取——与 App 的"密钥被拒即重取"同源。
+
+## 10. 通知公告（2026-09-28 用户提供请求与响应）
+
+`POST /component/queryTongZhiGongGaoPage`，Content-Type 为 `application/x-www-form-urlencoded;charset=UTF-8`。
+
+请求体：`bt=&pageNum=1&pageSize=15&kssj=`。`bt`、`kssj` 为空；翻页仅改变 `pageNum`。请求通过登录后的 WebView 同源 fetch，复用现有会话，不保存或手工拼接 Cookie。
+
+裸 PageHelper 响应字段：`total`、`list`、`pageNum`、`pageSize`、`nextPage`、`hasNextPage`。用户样本 total=4008、pageNum=1、pageSize=15、nextPage=2。
+
+每条公告使用 `id`、`bt`（标题）、`fssj`（发布时间）、`sfwblj`（1 为外链）、`wburl` / `url`（原文）。样本中的 `nr`、`fj` 等为空，不假定存在正文接口，不保存接收人或权限等无关字段。原文只接受有主机的 HTTP(S) 地址，通过外部浏览器打开；相对地址或空链接不猜测路径。
+
+一键同步取第一页，公告页按需翻页；本地按 ID 去重、保留服务端顺序。第一页成功后替换缓存，后续页追加，列表和分页元数据在 Room 同一事务中保存。失败保留旧数据；退出登录和缓存清理隔离迟到回调。不做定时轮询或系统通知推送。
+
+当前 Room 版本为 9，需由开发者生成 `9.json` 并验证 8→9 与 5→9 迁移；版本 8 的校历迁移继续保留。参见 `docs/UNIFIED_SYNC_ACCEPTANCE.md`。接口依据用户提供材料实现，源码编辑未访问学校服务或运行接口验证。

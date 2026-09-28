@@ -4,7 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AcademicRequestsTest {
-    @Test fun `导入同时获取课表与成绩 账号及成绩考试入口均可只获取教务数据`() {
+    @Test fun `请求门禁支持按需组合课表与成绩任务`() {
         listOf(true, false).forEach { import ->
             val requests = AcademicRequests()
             requests.beginLogin(import)
@@ -32,7 +32,7 @@ class AcademicRequestsTest {
             val import = requests.launch(AcademicTask.IMPORT, 0)!!
             val grades = requests.launch(AcademicTask.GRADES, 0)!!
             requests.finish(AcademicTask.IMPORT, import, failed = failed)
-            val preview = AcademicSessionState(requests[AcademicTask.IMPORT], requests[AcademicTask.GRADES], AcademicTask.IMPORT)
+            val preview = AcademicSessionState(requests[AcademicTask.IMPORT], requests[AcademicTask.GRADES], AcademicTask.IMPORT, browserReady = true)
             assertTrue(preview.needsBrowser)
             assertFalse(preview.browserVisible)
             requests.cancel(AcademicTask.IMPORT)

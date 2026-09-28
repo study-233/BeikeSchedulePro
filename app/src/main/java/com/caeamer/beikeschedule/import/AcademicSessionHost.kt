@@ -46,6 +46,7 @@ private fun SessionBrowser(
     var pageLoading by remember { mutableStateOf(true) }
     var pageMessage by remember { mutableStateOf<String?>(null) }
     val lease = remember { session.attachBrowser() }
+    val revision = remember { state.browserRevision }
     var alive by remember { mutableStateOf(true) }
     DisposableEffect(Unit) {
         onDispose { alive = false; session.detachBrowser(lease) }
@@ -56,15 +57,22 @@ private fun SessionBrowser(
         if (importing) onCloseImport()
     }
     BackHandler(state.browserVisible, close)
-    LaunchedEffect(ready, webView, state.importRequest, state.gradesRequest) {
+    LaunchedEffect(ready, webView, state.importRequest, state.gradesRequest, state.otherRequests) {
         val browser = webView
         if (ready && browser != null) {
             AcademicTask.entries.forEach { task ->
                 val token = session.launchTask(task) ?: return@forEach
                 if (task == AcademicTask.IMPORT) onImportStart()
                 try {
-                    val asset = if (task == AcademicTask.IMPORT) "jw_import.js" else "jw_grades.js"
-                    val script = loadAssetScript(context, "import/$asset").replace("__BEIKE_REQUEST_ID__", token.toString())
+                    val asset = when (task) {
+                        AcademicTask.IMPORT -> "jw_import.js"
+                        AcademicTask.NOTICES -> "jw_notices.js"
+                        else -> "jw_grades.js"
+                    }
+                    val script = loadAssetScript(context, "import/jw_auth.js") + "\n" + loadAssetScript(context, "import/$asset")
+                        .replace("__BEIKE_REQUEST_ID__", token.toString())
+                        .replace("__BEIKE_TASK__", task.name)
+                        .replace("__BEIKE_PAGE__", state.noticePage.toString())
                     browser.evaluateJavascript(script, null)
                 } catch (_: Exception) {
                     session.fail(task, token, "无法启动获取，请重试")
@@ -72,33 +80,38 @@ private fun SessionBrowser(
             }
         }
     }
-    fun isCurrentBrowser() = alive && session.isCurrentBrowser(lease)
+    fun isCurrentBrowser() = alive && session.isCurrentBrowser(lease) && session.state.value.browserRevision == revision
     fun bridge(task: AcademicTask) = ScopedJwBridge(
         accepts = { isCurrentBrowser() && session.accepts(task, it) },
+        onAuthRequired = { session.authenticationExpired(task, it) },
         delegate = { token ->
             if (task == AcademicTask.IMPORT) JwImportBridge(
                 onSuccess = { a, b, c, d, e, f -> session.importResult(token, listOf(a, b, c, d, e, f)) },
                 onFailure = { session.fail(task, token, it) },
-            ) else GradesBridge(
-                onResult = { a, b, c, d, e, f, g, h -> session.gradesResult(token, AcademicPayload(a, b, c, d, e, f, g, h)) },
+            ) else if (task == AcademicTask.NOTICES) object : JwBridge {
+                override fun onError(message: String) = session.fail(task, token, message)
+                override fun onMessage(fn: String, args: List<String>) {
+                    if (fn == "onNoticesResult") session.noticesResult(token, args.firstOrNull().orEmpty())
+                }
+            } else GradesBridge(
+                onResult = { a, b, c, d, e, f, g, h -> session.gradesResult(task, token, AcademicPayload(a, b, c, d, e, f, g, h)) },
                 onFailure = { session.fail(task, token, it) },
             )
         },
     )
-    // 隐藏时只占一个不可交互、无无障碍节点的像素区域，JS 网络任务继续执行。
+    // 隐藏时仍保留正常视口，学校登录按钮才能完成布局并被识别；不接收输入或无障碍焦点。
     Column(if (state.browserVisible) Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()
-        else Modifier.size(1.dp).alpha(0f).clearAndSetSemantics { }) {
+        else Modifier.fillMaxSize().alpha(0f).clearAndSetSemantics { }) {
         if (state.browserVisible) {
             TopAppBar(
-                title = { Text(if (state.foregroundTask == AcademicTask.IMPORT) "从教务系统导入" else "教务数据") },
+                title = { Text("教务登录与同步") },
                 navigationIcon = { IconButton(onClick = close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
                 actions = { IconButton(onClick = session::retryBrowser) { Icon(Icons.Default.Refresh, "重新加载教务网页") } },
             )
             Text(
-                pageMessage ?: if (state.foregroundTask == AcademicTask.IMPORT) "登录后自动获取课表、成绩与考试" else "登录后自动获取成绩与考试",
+                pageMessage ?: state.browserMessage ?: "登录成功后自动同步，已有数据会保留到更新成功",
                 Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium,
             )
-            AcademicSyncStatus(state.gradesRequest, session::startGrades)
             if (pageLoading || state.importRequest?.phase == AcademicPhase.RUNNING || state.gradesRequest?.phase == AcademicPhase.RUNNING) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
@@ -106,20 +119,22 @@ private fun SessionBrowser(
         }
         JwWebView(
             bridge = bridge(AcademicTask.IMPORT), bridgeName = "BeikeImport",
-            additionalBridges = mapOf("BeikeGrades" to bridge(AcademicTask.GRADES)),
-            modifier = if (state.browserVisible) Modifier.fillMaxWidth().weight(1f) else Modifier.size(1.dp),
+            additionalBridges = AcademicTask.entries.filter { it != AcademicTask.IMPORT }.associate { "Beike${it.name}" to bridge(it) },
+            modifier = Modifier.fillMaxWidth().weight(1f),
             interactive = state.browserVisible,
             onCreated = { webView = it },
-            onMainPage = { if (isCurrentBrowser()) ready = true },
+            onMainPage = { if (isCurrentBrowser()) { ready = true; session.browserReady() } },
             onPageStarted = {
                 if (isCurrentBrowser()) { ready = false; pageMessage = null; session.pageStarted(lease) }
             },
             onPageError = { if (isCurrentBrowser()) session.pageFailed(it) },
             onPageProgress = { if (isCurrentBrowser()) pageLoading = it < 100 },
+            onOpeningAuth = { if (isCurrentBrowser()) session.openingAuthentication() },
+            onAuthFallback = { if (isCurrentBrowser()) session.showManualLogin(it) },
             onAuthPageChanged = {
                 if (isCurrentBrowser()) {
                     authPage = it
-                    if (it && !session.state.value.browserVisible) session.pageFailed("会话已过期，请重新登录后重试")
+                    if (it) session.requireLogin()
                 }
             },
         )
@@ -128,12 +143,13 @@ private fun SessionBrowser(
 
 /** 不包含分数，尊重成绩隐私；导入预览、校园和宿主浏览页复用。 */
 @Composable
-fun AcademicSyncStatus(request: AcademicRequest?, onRetry: () -> Unit) {
+fun AcademicSyncStatus(request: AcademicRequest?, onRetry: () -> Unit, waitingLabel: String = "登录后自动获取成绩") {
     if (request == null || request.phase == AcademicPhase.CANCELLED) return
     val label = when (request.phase) {
-        AcademicPhase.WAITING -> "登录后自动获取成绩与考试"
-        AcademicPhase.RUNNING, AcademicPhase.SAVING -> "正在获取成绩与考试…"
-        AcademicPhase.SUCCESS -> request.message ?: "成绩与考试已更新"
+        AcademicPhase.WAITING -> waitingLabel
+        AcademicPhase.RUNNING, AcademicPhase.SAVING -> "正在更新成绩…"
+        AcademicPhase.REVIEW -> "课表等待选择保存目标"
+        AcademicPhase.SUCCESS -> request.message ?: "成绩已更新，其他项目可在账号与数据页查看"
         AcademicPhase.FAILED -> request.message ?: "获取失败，已保留上次数据"
         AcademicPhase.CANCELLED -> return
     }

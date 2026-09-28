@@ -1,5 +1,6 @@
 package com.caeamer.beikeschedule.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.PrimaryKey
@@ -17,16 +18,19 @@ data class ScheduleEntity(
     val firstMonday: String = "",
     val totalWeeks: Int = 20,
     val weekMondays: String = "",
+    @ColumnInfo(defaultValue = "''") val holidayDates: String = "",
 ) {
     fun semester() = SettingsStore.SemesterConfig(
         xn, xq, semesterName, firstMonday, totalWeeks,
         weekMondays.split(',').filter { it.isNotBlank() },
+        holidayDates.split(',').filter { it.isNotBlank() },
     )
 
     fun withSemester(value: SettingsStore.SemesterConfig) = copy(
         xn = value.xn, xq = value.xq, semesterName = value.name,
         firstMonday = value.firstMonday, totalWeeks = value.totalWeeks,
         weekMondays = value.weekMondays.joinToString(","),
+        holidayDates = value.holidayDates.joinToString(","),
     )
 }
 

@@ -120,9 +120,19 @@ class MainActivity : ComponentActivity() {
                 var showImport by rememberSaveable { mutableStateOf(false) }
                 LaunchedEffect(academicState.importEvent) {
                     academicState.importEvent?.let { event ->
-                        event.values?.let { v -> importViewModel.onFetchResult(v[0], v[1], v[2], v[3], v[4], v[5]) }
+                        event.values?.let { importViewModel.acceptSyncResult(event, academicState.automaticImport, academicSession) }
                         event.error?.let(importViewModel::onFetchError)
                         academicSession.consumeImportEvent(event.id)
+                    }
+                }
+                LaunchedEffect(academicState.importRequest?.phase) {
+                    when (academicState.importRequest?.phase) {
+                        com.caeamer.beikeschedule.import.AcademicPhase.REVIEW -> showImport = true
+                        com.caeamer.beikeschedule.import.AcademicPhase.CANCELLED -> {
+                            importViewModel.cancelPendingImport()
+                            showImport = false
+                        }
+                        else -> Unit
                     }
                 }
                 // 进程重建后恢复尚在登录的导入入口；配置重建保留现有请求，不重复启动。
@@ -152,7 +162,7 @@ class MainActivity : ComponentActivity() {
                         if (showImport) {
                             ImportScreen(
                                 onDone = { showImport = false; academicSession.leaveImport() },
-                                onRetry = { importViewModel.backToBrowsing(); academicSession.startImport() },
+                                onRetry = { importViewModel.backToBrowsing(); academicSession.leaveImport(); academicSession.retry(com.caeamer.beikeschedule.import.AcademicTask.IMPORT) },
                                 viewModel = importViewModel,
                             )
                         } else {
@@ -162,9 +172,9 @@ class MainActivity : ComponentActivity() {
                                     widgetOpenRequest = widgetOpenRequest,
                                     onWidgetConsumed = { widgetOpenRequest = 0 },
                                     onImport = {
-                                        importViewModel.resetIfFinished()
+                                        importViewModel.backToBrowsing()
                                         showImport = true
-                                        if (importViewModel.state.value is ImportUiState.Browsing || importViewModel.state.value is ImportUiState.Fetching) academicSession.startImport()
+                                        academicSession.startImport()
                                     },
                                 )
                             }

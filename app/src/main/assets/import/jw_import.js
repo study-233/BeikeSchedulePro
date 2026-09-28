@@ -6,7 +6,7 @@
  * 教学周日历（修国庆跳周）：优先 Xiaoli/queryMonthList 一次取全量校历
  * （需 RoleCode 头；xlList 按周 7 条、每天一条，MON/TUES/... 字段只有一个非空），
  * 失败则逐周 queryRlZcSj 兜底。产出统一结构：
- *   {"totalWeeks":18, "weeks":[{"zc":1,"monday":"2026-09-07"}, ...]}
+ *   {"totalWeeks":18, "weeks":[{"zc":1,"monday":"2026-09-07"}, ...], "holidayDates":["2026-09-25", ...]}
  */
 (function (requestId) {
     if (window.__beikeRunning === requestId) return;
@@ -35,12 +35,7 @@
             // 超时兜底：连接挂起时 fetch 可以永不 resolve，界面会一直停在"抓取中…"。
             // 单次请求 20 秒足够（兜底路径最多 25 次顺序请求，各算各的）。
             signal: AbortSignal.timeout(20000)
-        }).then(function (r) {
-            // 会话过期被 302 到登录页、接口 5xx 时 r.text() 会拿到 HTML，
-            // 下游 JSON.parse 报英文错直接铺到中文界面。显式抛 HTTP 状态更可读。
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            return r.text();
-        });
+        }).then(window.BeikeAuth.read);
     }
 
     /**
@@ -64,14 +59,26 @@
             .then(function (text) {
                 var data = parseJson(text, '校历解析失败');
                 var semKey = xn + xq; // xlList 里 XNXQ 形如 "2026-20271"
-                var weeks = (data.xlList || [])
-                    .filter(function (e) { return e.XNXQ === semKey && e.MON && e.ZC >= 1 && e.ZC <= 90; })
+                var rows = (data.xlList || []).filter(function (e) { return e.XNXQ === semKey; });
+                var weeks = rows
+                    .filter(function (e) { return e.MON && e.ZC >= 1 && e.ZC <= 90; })
                     .map(function (e) { return { zc: e.ZC, monday: e.MON }; })
                     .sort(function (a, b) { return a.zc - b.zc; });
                 if (!weeks.length) return null;
-                return weeks;
+                // 星期日期字段对应的 *1 为学校逐日放假标记（与月历 sffj 一致）。
+                // 教学周内也会放假，不能用 ZC=99 或自行推算周末代替。
+                var holidayDates = [];
+                rows.forEach(function (e) {
+                    ['MON', 'TUES', 'WED', 'THUR', 'FRI', 'SAT', 'SUN'].forEach(function (day) {
+                        if (e[day] && String(e[day + '1']) === '1') holidayDates.push(e[day]);
+                    });
+                });
+                return { weeks: weeks, holidayDates: Array.from(new Set(holidayDates)).sort() };
             })
-            .catch(function () { return null; });
+            .catch(function (error) {
+                if (error.beikeAuthRequired) throw error;
+                return null;
+            });
     }
 
     /** 逐周 queryRlZcSj 兜底 → 统一周历结构。 */
@@ -115,18 +122,22 @@
                         .filter(function (z) { return typeof z === 'number' && z >= 1 && z <= 90; });
                 } catch (e) { /* 周次列表异常时由校历自行推断 */ }
 
-                return calendarFromXiaoli(sem.XN, sem.XQ).then(function (weeks) {
-                    if (weeks) return weeks;
+                return calendarFromXiaoli(sem.XN, sem.XQ).then(function (calendar) {
+                    if (calendar) return calendar;
                     var loopList = zcList.length ? zcList
                         : Array.from({ length: 25 }, function (_, i) { return i + 1; });
-                    return calendarByWeekLoop(sem.XN, sem.XQ, loopList);
-                }).then(function (weeks) {
+                    return calendarByWeekLoop(sem.XN, sem.XQ, loopList).then(function (weeks) {
+                        // 逐周接口没有逐日放假标记；无可靠数据时不标色。
+                        return { weeks: weeks || [], holidayDates: [] };
+                    });
+                }).then(function (result) {
+                    var weeks = result.weeks;
                     var totalWeeks = Math.max(
                         zcList.length ? Math.max.apply(null, zcList) : 0,
                         weeks ? weeks.length : 0,
                         16
                     );
-                    var calendar = JSON.stringify({ totalWeeks: totalWeeks, weeks: weeks || [] });
+                    var calendar = JSON.stringify({ totalWeeks: totalWeeks, weeks: weeks || [], holidayDates: result.holidayDates });
                     // 成功路径也必须复位重入标志：否则"手动抓取"按钮在首次成功后
                     // 变成静默无操作的空按钮（jw_grades.js 一直在成功路径复位，此处是漏改）。
                     if (window.__beikeRunning === requestId) window.__beikeRunning = null;
@@ -136,6 +147,6 @@
         })
         .catch(function (e) {
             if (window.__beikeRunning === requestId) window.__beikeRunning = null;
-            send('onError', [String(e)]);
+            send(e.beikeAuthRequired ? 'onAuthRequired' : 'onError', [String(e)]);
         });
 })('__BEIKE_REQUEST_ID__');
