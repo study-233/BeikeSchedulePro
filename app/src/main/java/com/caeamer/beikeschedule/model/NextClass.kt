@@ -5,12 +5,12 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 
 /**
- * "下一节课"解析：仅取今天（严格教学周内）尚未开始的最早一节课。
+ * "下一节课"解析：仅取今天尚未开始的最早一节课，包含明确配置的调休补课。
  *
  * 口径（用户确认）：
  * - 只看今天——今天课上完就不标记，不跨天指向明天的课；
  * - 正在进行的课不算下一节（已开始的课跳过，取之后最早的一节）；
- * - 仅在今天所属教学周内匹配，假期/开学前/学期后（todayTeachingWeek=null）一律不标记。
+ * - 普通课程按今天的教学周匹配；补课使用来源日期的教学周，但上课时刻仍在今天。
  */
 object NextClass {
 
@@ -20,7 +20,23 @@ object NextClass {
         val dayOfWeek: Int,
         val week: Int,
         val startTime: String,
+        val date: java.time.LocalDate? = null,
     )
+
+    /** 调休与普通课程均由统一日期解析器筛选；这里只比较实际日期的上课时间。 */
+    fun resolve(occurrences: List<CourseOccurrence>, sectionStartTimes: Map<Int, String>,
+                semester: com.caeamer.beikeschedule.data.pref.SettingsStore.SemesterConfig, now: LocalDateTime): Target? =
+        occurrences.asSequence().filter { it.date == now.toLocalDate() }
+            .mapNotNull { occurrence ->
+                val start = sectionStartTimes[occurrence.course.startSection]?.let {
+                    runCatching { LocalTime.parse(it) }.getOrNull()
+                } ?: return@mapNotNull null
+                if (start.isAfter(now.toLocalTime())) occurrence to start else null
+            }.minByOrNull { it.second }?.let { (occurrence, start) ->
+                WeekResolver.teachingWeekOf(semester, occurrence.sourceDate)?.let { week ->
+                    Target(occurrence.course.id, occurrence.date.dayOfWeek.value, week, start.toString(), occurrence.date)
+                }
+            }
 
     /**
      * @param courses 课表渲染用的合并后课程（与卡片 id 一致，见 CourseMerger）

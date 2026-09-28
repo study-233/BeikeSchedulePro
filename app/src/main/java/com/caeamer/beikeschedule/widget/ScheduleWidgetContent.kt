@@ -225,7 +225,7 @@ private fun CourseEntry(
         Spacer(GlanceModifier.width(if (spacious) 10.dp else 8.dp))
         Column(GlanceModifier.defaultWeight()) {
             Text(
-                course.name,
+                if (item.isMakeup) "补课 · ${course.name}" else course.name,
                 style = TextStyle(
                     color = primary,
                     fontSize = if (emphasized) { if (spacious) 18.sp else 14.sp } else { if (spacious) 16.sp else 12.sp },

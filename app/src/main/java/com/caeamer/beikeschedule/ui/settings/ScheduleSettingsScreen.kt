@@ -62,6 +62,7 @@ fun ScheduleSettingsScreen(page: SettingsPage, viewModel: ScheduleViewModel,
         }
         val editingSemester = schedules.firstOrNull { it.id == editingScheduleId }?.semester() ?: state.semester
         SemesterEditor(editingSemester, saving, error,
+            adjustmentContent = { CalendarAdjustmentSettings(viewModel, editingSemester) },
             onSave = { draft -> viewModel.saveSemesterDraft(editingScheduleId, draft, onBack) },
             onBack = { viewModel.clearSettingsError(); onBack() })
         return
@@ -127,7 +128,8 @@ fun ScheduleSettingsScreen(page: SettingsPage, viewModel: ScheduleViewModel,
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SemesterEditor(current: SettingsStore.SemesterConfig, saving: Boolean, error: String?,
-                            onSave: (SemesterDraft) -> Unit, onBack: () -> Unit) {
+                            onSave: (SemesterDraft) -> Unit, onBack: () -> Unit,
+                            adjustmentContent: @Composable () -> Unit = {}) {
     val originalName by rememberSaveable { mutableStateOf(current.name) }
     val originalDate by rememberSaveable { mutableStateOf(current.firstMonday) }
     val originalWeeks by rememberSaveable { mutableIntStateOf(current.totalWeeks) }
@@ -160,6 +162,7 @@ internal fun SemesterEditor(current: SettingsStore.SemesterConfig, saving: Boole
             if (weeks < current.weekMondays.size) Text("保存时总周数将校正为至少 ${current.weekMondays.size} 周。",
                 color = MaterialTheme.colorScheme.error)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            adjustmentContent()
         }
     }
     if (confirmDiscard) AlertDialog(onDismissRequest = { confirmDiscard = false },
@@ -176,6 +179,41 @@ internal fun SemesterEditor(current: SettingsStore.SemesterConfig, saving: Boole
                 pickDate = false
             }) { Text("确定") } },
             dismissButton = { TextButton(onClick = { pickDate = false }) { Text("取消") } }) { DatePicker(picker) }
+    }
+}
+
+@Composable
+private fun CalendarAdjustmentSettings(viewModel: ScheduleViewModel, semester: SettingsStore.SemesterConfig) {
+    val cache by viewModel.adjustmentStatus.collectAsStateWithLifecycle()
+    val refreshing by viewModel.refreshingAdjustments.collectAsStateWithLifecycle()
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val config = remember(cache?.body) {
+        cache?.body?.takeIf { it.isNotBlank() }?.let {
+            runCatching { com.caeamer.beikeschedule.model.CalendarAdjustmentCodec.parse(it) }.getOrNull()
+        }
+    }
+    val applied = remember(config, semester) { com.caeamer.beikeschedule.model.DateCourseResolver.applicable(semester, config) }
+    val rules = config?.semesters?.firstOrNull { it.xn == semester.xn && it.xq == semester.xq }
+    HorizontalDivider()
+    TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起调休安排" else "查看调休安排") }
+    if (expanded) {
+        Text("由项目维护者提供 · ${config?.let { "版本 ${it.revision}" } ?: "尚无配置"}", style = MaterialTheme.typography.bodyMedium)
+        Text(cache?.status ?: "尚未获取调休配置", style = MaterialTheme.typography.bodySmall)
+        cache?.lastCheckedAt?.takeIf { it > 0 }?.let {
+            val time = Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+            Text("最近检查：$time", style = MaterialTheme.typography.bodySmall)
+        }
+        applied.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (rules == null || (rules.suspendedDates.isEmpty() && rules.extraClasses.isEmpty())) Text("当前学期暂无调休安排")
+        rules?.suspendedDates?.forEach { Text("$it · 常规教务课程停课") }
+        rules?.extraClasses?.forEach {
+            Text("${it.date} · 补 ${it.sourceDate} 的课程" + if (it.note.isNotBlank()) "\n${it.note}" else "")
+        }
+        Text("仅调整教务课程，补课追加到当天；手动课程不受影响。离线使用最近有效配置。", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = viewModel::refreshAdjustments, enabled = !refreshing) {
+            Text(if (refreshing) "正在刷新…" else "立即刷新")
+        }
     }
 }
 

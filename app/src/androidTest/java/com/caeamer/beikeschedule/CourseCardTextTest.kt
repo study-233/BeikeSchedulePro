@@ -40,6 +40,19 @@ class CourseCardTextTest {
         compose.setContent { TestCard(value, scale, systemScale, width, extraHeight) }
     }
 
+    private fun locationLayout(): TextLayoutResult {
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("course_location")
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        return layouts.single()
+    }
+
+    private fun assertFullLocation(layout: TextLayoutResult) {
+        assertTrue(!layout.didOverflowHeight)
+        repeat(layout.lineCount) { assertTrue(!layout.isLineEllipsized(it)) }
+        assertEquals(layout.layoutInput.text.length, layout.getLineEnd(layout.lineCount - 1, visibleEnd = true))
+    }
+
     @Composable
     private fun TestCard(value: CourseEntity, scale: Float, systemScale: Float, width: Int, extraHeight: Int = 0) {
         val density = Density(LocalDensity.current.density, systemScale)
@@ -67,6 +80,64 @@ class CourseCardTextTest {
     fun missingTeacherDoesNotLeaveATextNode() {
         show(course.copy(teacher = " "))
         compose.onNodeWithTag("course_teacher").assertDoesNotExist()
+    }
+
+    @Test
+    fun locationSplitsOnlyWhenActualWidthAndFontSizeRequireIt() {
+        data class Case(val width: Int, val scale: Float, val systemScale: Float, val split: Boolean)
+        var scenario by mutableStateOf(Case(96, 1f, 1f, false))
+        compose.setContent {
+            val c = scenario
+            TestCard(course.copy(location = "机械楼720"), c.scale, c.systemScale, c.width)
+        }
+        listOf(
+            Case(96, 1f, 1f, false),
+            Case(44, 1f, 1f, true),
+            Case(64, 1f, 1f, false),
+            Case(64, 1.6f, 1f, true),
+            Case(64, 1f, 2f, true),
+            Case(96, 1f, 1f, false),
+        ).forEach { c ->
+            compose.runOnIdle { scenario = c }
+            val layout = locationLayout()
+            assertEquals(if (c.split) "机械楼\n720" else "机械楼720", layout.layoutInput.text.text)
+            if (c.split) assertTrue(layout.lineCount >= 2) else assertEquals(1, layout.lineCount)
+            assertFullLocation(layout)
+        }
+    }
+
+    @Test
+    fun longBuildingsAndUnrecognizedLocationsWrapWithoutLosingText() {
+        var location by mutableStateOf("教学楼A-301")
+        compose.setContent { TestCard(course.copy(location = location), 1.6f, 1f, 44) }
+        mapOf(
+            "教学楼A-301" to "教学楼\nA-301",
+            "材料科学与工程实验楼301B" to "材料科学与工程实验楼\n301B",
+            "体育场东侧集合" to "体育场东侧集合",
+            "机械楼" to "机械楼",
+            "实验中心302" to "实验中心302",
+            "逸夫楼\n402" to "逸夫楼\n402",
+        ).forEach { (source, expected) ->
+            compose.runOnIdle { location = source }
+            val layout = locationLayout()
+            assertEquals(expected, layout.layoutInput.text.text)
+            assertTrue(layout.lineCount > 1)
+            assertFullLocation(layout)
+            val room = compose.onNodeWithTag("course_location").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val teacher = compose.onNodeWithTag("course_teacher").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertTrue(room.bottom <= teacher.top)
+        }
+    }
+
+    @Test
+    fun emptyAndPlaceholderLocationsDoNotLeaveATextNode() {
+        var location by mutableStateOf("")
+        compose.setContent { TestCard(course.copy(location = location), 1.6f, 1f, 44) }
+        listOf("", " ", "-", "【校本部】-").forEach { source ->
+            compose.runOnIdle { location = source }
+            compose.onNodeWithTag("course_location").assertDoesNotExist()
+            compose.onNodeWithTag("course_teacher").assertIsDisplayed()
+        }
     }
 
     @Test
@@ -116,7 +187,7 @@ class CourseCardTextTest {
     @Test
     fun balancedChineseTitlesDoNotLeaveASingleCharacterOnLastLine() {
         var name by mutableStateOf("博弈论入门")
-        compose.setContent { TestCard(course.copy(name = name), 1f, 1f, 66) }
+        compose.setContent { TestCard(course.copy(name = name), 1f, 1f, 66, extraHeight = 80) }
         listOf("博弈论入门", "矿物加工技术新进展").forEach { title ->
             compose.runOnIdle { name = title }
             val layouts = mutableListOf<TextLayoutResult>()
@@ -131,7 +202,7 @@ class CourseCardTextTest {
     }
 
     @Test
-    fun actualMeasuredHeightKeepsAllInformationAcrossWidthsAndFontScales() {
+    fun minimumHeightPreservesDetailsAndOneTitleLineAcrossWidthsAndFontScales() {
         data class Case(val width: Int, val scale: Float, val systemScale: Float, val span: Int)
         var scenario by mutableStateOf(Case(66, 1f, 1f, 2))
         compose.setContent {
@@ -147,7 +218,66 @@ class CourseCardTextTest {
                     .map { compose.onNodeWithTag(it).assertIsDisplayed().fetchSemanticsNode().boundsInRoot }
                 rows.zipWithNext().forEach { (above, below) -> assertTrue(above.bottom <= below.top) }
                 assertTrue(rows.last().bottom <= card.bottom)
+                assertFullLocation(locationLayout())
+                val names = mutableListOf<TextLayoutResult>()
+                compose.onNodeWithTag("course_name").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(names) }
+                assertEquals(1, names.single().lineCount)
+                assertTrue(names.single().getLineBottom(0) <= names.single().size.height + 1f)
             }
+        }
+    }
+
+    @Test
+    fun titleUsesExtraHeightAndEllipsizesWithoutTakingSpaceFromLocation() {
+        var extraHeight by mutableIntStateOf(0)
+        compose.setContent {
+            TestCard(course.copy(name = "材料科学与工程导论及实验基础"), 1.6f, 1f, 44, extraHeight)
+        }
+        var previousLines = 0
+        for (extra in listOf(0, 55, 120)) {
+            compose.runOnIdle { extraHeight = extra }
+            val names = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithTag("course_name").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(names) }
+            val name = names.single()
+            assertTrue(name.lineCount > previousLines)
+            assertTrue(name.lineCount <= 4)
+            assertTrue(name.isLineEllipsized(name.lineCount - 1))
+            assertTrue(name.getLineBottom(name.lineCount - 1) <= name.size.height + 1f)
+            previousLines = name.lineCount
+            assertFullLocation(locationLayout())
+            val title = compose.onNodeWithTag("course_name").fetchSemanticsNode().boundsInRoot
+            val room = compose.onNodeWithTag("course_location").fetchSemanticsNode().boundsInRoot
+            assertTrue(title.bottom <= room.top)
+            compose.onNodeWithTag("course_teacher").assertIsDisplayed()
+            compose.onNodeWithTag("course_weeks").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun longTitleDoesNotIncreaseMinimumHeightAndTimeLabelsRespectSystemScale() {
+        var systemScale by mutableStateOf(1f)
+        var shortHeight = 0f
+        var longHeight = 0f
+        var timeHeight = 0f
+        compose.setContent {
+            val density = Density(LocalDensity.current.density, systemScale)
+            CompositionLocalProvider(LocalDensity provides density) {
+                val measurer = rememberCourseCardMeasurer(1.6f)
+                val width = with(density) { 44.dp.roundToPx() }
+                shortHeight = measurer.measure(course.copy(name = "课"), width).cardHeight
+                longHeight = measurer.measure(course.copy(name = "材料科学与工程导论及实验基础"), width).cardHeight
+                timeHeight = measurer.minimumTimeUnitHeight(listOf(
+                    com.caeamer.beikeschedule.data.local.SectionTimeEntity(1, "08:00", "08:45"),
+                    com.caeamer.beikeschedule.data.local.SectionTimeEntity(2, "08:50", "09:35"),
+                ))
+            }
+        }
+        compose.runOnIdle { assertEquals(shortHeight, longHeight, 0.001f) }
+        val originalTimeHeight = timeHeight
+        compose.runOnIdle { systemScale = 2f }
+        compose.runOnIdle {
+            assertEquals(shortHeight, longHeight, 0.001f)
+            assertTrue(timeHeight > originalTimeHeight)
         }
     }
 

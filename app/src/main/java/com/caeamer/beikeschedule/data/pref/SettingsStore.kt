@@ -77,6 +77,7 @@ class SettingsStore(private val context: Context) {
 
     private object Keys {
         val SCHEDULE_FONT = intPreferencesKey("schedule_font_percent")
+        val SCHEDULE_SECTION_HEIGHT = intPreferencesKey("schedule_section_height_percent")
         val SCHEDULE_BACKGROUND = stringPreferencesKey("schedule_background_file")
         val SCHEDULE_SCALE = stringPreferencesKey("schedule_background_scale")
         val SCHEDULE_OVERLAY = intPreferencesKey("schedule_background_overlay")
@@ -117,6 +118,7 @@ class SettingsStore(private val context: Context) {
 
     private fun readAppearance(p: Preferences) = ScheduleAppearance(
         fontPercent = p[Keys.SCHEDULE_FONT] ?: 100,
+        sectionHeightPercent = p[Keys.SCHEDULE_SECTION_HEIGHT] ?: 100,
         backgroundFile = p[Keys.SCHEDULE_BACKGROUND].orEmpty(),
         imageScale = BackgroundScale.entries.firstOrNull { it.name == p[Keys.SCHEDULE_SCALE] }
             ?: BackgroundScale.CROP,
@@ -132,6 +134,7 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { p ->
             val value = transform(readAppearance(p)).normalized()
             p[Keys.SCHEDULE_FONT] = value.fontPercent
+            p[Keys.SCHEDULE_SECTION_HEIGHT] = value.sectionHeightPercent
             p[Keys.SCHEDULE_BACKGROUND] = value.backgroundFile
             p[Keys.SCHEDULE_SCALE] = value.imageScale.name
             p[Keys.SCHEDULE_OVERLAY] = value.overlayPercent

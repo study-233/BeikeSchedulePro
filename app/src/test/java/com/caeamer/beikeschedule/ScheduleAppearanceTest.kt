@@ -10,6 +10,7 @@ class ScheduleAppearanceTest {
     fun `新配置保持原字号和默认渐变`() {
         val value = ScheduleAppearance().normalized()
         assertEquals(100, value.fontPercent)
+        assertEquals(100, value.sectionHeightPercent)
         assertEquals("", value.backgroundFile)
         assertEquals(BackgroundScale.CROP, value.imageScale)
         assertEquals(30, value.overlayPercent)
@@ -21,6 +22,9 @@ class ScheduleAppearanceTest {
         assertEquals(80, ScheduleAppearance(fontPercent = Int.MIN_VALUE).normalized().fontPercent)
         assertEquals(160, ScheduleAppearance(fontPercent = Int.MAX_VALUE).normalized().fontPercent)
         assertEquals(105, ScheduleAppearance(fontPercent = 103).normalized().fontPercent)
+        assertEquals(80, ScheduleAppearance(sectionHeightPercent = Int.MIN_VALUE).normalized().sectionHeightPercent)
+        assertEquals(160, ScheduleAppearance(sectionHeightPercent = Int.MAX_VALUE).normalized().sectionHeightPercent)
+        assertEquals(105, ScheduleAppearance(sectionHeightPercent = 103).normalized().sectionHeightPercent)
         val low = ScheduleAppearance(overlayPercent = -1, blurDp = -1).normalized()
         val high = ScheduleAppearance(overlayPercent = 999, blurDp = 999).normalized()
         assertEquals(0, low.overlayPercent)
@@ -30,12 +34,12 @@ class ScheduleAppearanceTest {
     }
 
     @Test
-    fun `恢复背景保留字号且清除图片样式`() {
+    fun `恢复背景保留字号和节次高度且清除图片样式`() {
         val restored = ScheduleAppearance(
-            fontPercent = 145, backgroundFile = FILE_NAME,
+            fontPercent = 145, sectionHeightPercent = 125, backgroundFile = FILE_NAME,
             imageScale = BackgroundScale.FIT, overlayPercent = 70, blurDp = 20,
         ).withoutBackground()
-        assertEquals(ScheduleAppearance(fontPercent = 145), restored)
+        assertEquals(ScheduleAppearance(fontPercent = 145, sectionHeightPercent = 125), restored)
     }
 
     @Test

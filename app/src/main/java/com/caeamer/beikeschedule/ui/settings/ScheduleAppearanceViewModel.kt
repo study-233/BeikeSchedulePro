@@ -52,6 +52,7 @@ class ScheduleAppearanceViewModel(app: Application) : AndroidViewModel(app) {
     fun clearError() { errorState.value = null }
     fun reportPickerError() { errorState.value = "无法打开图片选择器，请稍后重试" }
     fun setFont(percent: Int) = update { it.copy(fontPercent = percent) }
+    fun setSectionHeight(percent: Int) = update { it.copy(sectionHeightPercent = percent) }
     fun setScale(scale: BackgroundScale) = update { it.copy(imageScale = scale) }
     fun setOverlay(percent: Int) = update { it.copy(overlayPercent = percent) }
     fun setBlur(dp: Int) = update { it.copy(blurDp = dp) }

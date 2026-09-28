@@ -6,8 +6,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import com.caeamer.beikeschedule.model.CourseCardLayout
 import com.caeamer.beikeschedule.model.ScheduleAppearance
@@ -19,6 +24,27 @@ import org.junit.Test
 
 class CourseCardPreviewTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun heightControlUpdatesPreviewAndKeepsConflictCoursesAligned() {
+        var heightPercent by mutableIntStateOf(80)
+        compose.setContent {
+            val density = LocalDensity.current
+            MaterialTheme {
+                CourseCardPreview(
+                    ScheduleAppearance(fontPercent = 80, sectionHeightPercent = heightPercent),
+                    with(density) { 360.dp.roundToPx() }, 7,
+                )
+            }
+        }
+        val compact = compose.onNodeWithTag("preview_card_0_0").fetchSemanticsNode().boundsInRoot.height
+        compose.runOnIdle { heightPercent = 160 }
+        val tall = compose.onNodeWithTag("preview_card_0_0").fetchSemanticsNode().boundsInRoot.height
+        assertTrue(tall > compact)
+        val conflict = compose.onNodeWithTag("preview_card_2_0").fetchSemanticsNode().boundsInRoot.height
+        assertEquals(tall, conflict, 1f)
+        compose.runOnIdle { heightPercent = 80 }
+        assertEquals(compact, compose.onNodeWithTag("preview_card_0_0").fetchSemanticsNode().boundsInRoot.height, 1f)
+    }
 
     @Test fun previewFollowsRealDayWidthAndConflictColumnsWhenWeekendSettingChanges() {
         var days by mutableStateOf(5)
@@ -32,7 +58,7 @@ class CourseCardPreviewTest {
             MaterialTheme {
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                     gridWidth = constraints.maxWidth
-                    CourseCardPreview(ScheduleAppearance(), gridWidth, days)
+                    CourseCardPreview(ScheduleAppearance(fontPercent = 160), gridWidth, days)
                 }
             }
         }
@@ -47,6 +73,16 @@ class CourseCardPreviewTest {
             assertEquals(normal.height, narrow.height, 1f)
             assertTrue(normal.width < previousWidth)
             previousWidth = normal.width
+            val locations = compose.onAllNodesWithTag("course_location", useUnmergedTree = true)
+            locations.assertCountEquals(4)
+            repeat(4) { index ->
+                val layouts = mutableListOf<TextLayoutResult>()
+                locations[index].performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                val layout = layouts.single()
+                assertTrue(!layout.didOverflowHeight)
+                repeat(layout.lineCount) { assertTrue(!layout.isLineEllipsized(it)) }
+                assertEquals(layout.layoutInput.text.length, layout.getLineEnd(layout.lineCount - 1, visibleEnd = true))
+            }
         }
     }
 }

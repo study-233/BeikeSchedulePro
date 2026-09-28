@@ -53,4 +53,7 @@ data class ActiveScheduleRecord(
     @Embedded val state: ScheduleStateEntity,
     @Relation(parentColumn = "activeScheduleId", entityColumn = "id", entity = ScheduleEntity::class)
     val details: ScheduleWithDetails,
+    // schedule_state 与全局配置均为 id=1；Room 关系查询将配置纳入同一事务及失效观察。
+    @Relation(parentColumn = "id", entityColumn = "id")
+    val adjustmentCache: List<CalendarAdjustmentCache> = emptyList(),
 )

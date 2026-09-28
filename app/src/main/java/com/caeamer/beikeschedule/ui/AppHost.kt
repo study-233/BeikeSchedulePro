@@ -76,26 +76,45 @@ fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel,
             onWidgetConsumed()
         }
     }
-    val course = remember(selectedCourseKey, state.courses) {
-        val id = selectedCourseKey?.substringBefore(':')?.toLongOrNull()
-        CourseMerger.mergeSameSlot(state.scheduledCourses).firstOrNull { it.id == id }
+    val resolvedDetail = remember(selectedCourseKey, state.courses, state.semester, state.adjustments, state.pages) {
+        val parts = selectedCourseKey?.split(':') ?: return@remember null
+        val id = parts.getOrNull(0)?.toLongOrNull() ?: return@remember null
+        val pageIndex = parts.getOrNull(1)?.toIntOrNull()?.minus(1) ?: return@remember null
+        val day = parts.getOrNull(2)?.toLongOrNull()?.takeIf { it in 1L..7L } ?: return@remember null
+        val pageInfo = state.pages.getOrNull(pageIndex) ?: return@remember null
+        val date = pageInfo.monday?.plusDays(day - 1)
+        if (date == null) return@remember state.scheduledCourses.groupBy { it.source }.values
+            .flatMap(CourseMerger::mergeSameSlot).firstOrNull { it.id == id }?.let { it to null }
+        val active = DateCourseResolver.resolve(state.scheduledCourses, state.semester, state.adjustments, date)
+            .firstOrNull { it.course.id == id }
+        if (active != null) active.displayCourse to active else {
+            DateCourseResolver.inactive(state.scheduledCourses, state.semester, state.adjustments, date)
+                .firstOrNull { it.id == id }?.let { it to null }
+        }
     }
+    val course = resolvedDetail?.first
     // 删除/隐藏后保留退出帧的数据，但不再使用过时的来源位置。
     var detailSnapshot by remember { mutableStateOf<com.caeamer.beikeschedule.data.local.CourseEntity?>(null) }
-    LaunchedEffect(course, selectedCourseKey, state.loaded) {
+    var occurrenceSnapshot by remember { mutableStateOf<CourseOccurrence?>(null) }
+    LaunchedEffect(resolvedDetail, selectedCourseKey, state.loaded) {
         if (course != null) detailSnapshot = course
+        if (resolvedDetail != null) occurrenceSnapshot = resolvedDetail.second
         else if (selectedCourseKey != null && detailSnapshot == null && state.loaded) selectedCourseKey = null
-        if (selectedCourseKey == null) detailSnapshot = null
+        if (selectedCourseKey == null) { detailSnapshot = null; occurrenceSnapshot = null }
     }
     var observedScheduleId by rememberSaveable { mutableStateOf<Long?>(null) }
-    LaunchedEffect(state.scheduleId) {
+    var observedScheduleVersion by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(state.scheduleId, state.scheduleVersion) {
         if (state.loaded) {
-            if (observedScheduleId != null && observedScheduleId != state.scheduleId) {
+            if (observedScheduleId != null && (observedScheduleId != state.scheduleId ||
+                    observedScheduleVersion != state.scheduleVersion)) {
                 selectedCourseKey = null
                 editCourseId = null
                 detailSnapshot = null
+                occurrenceSnapshot = null
             }
             observedScheduleId = state.scheduleId
+            observedScheduleVersion = state.scheduleVersion
         }
     }
     CompositionLocalProvider(LocalCourseSources provides sources) {
@@ -193,13 +212,16 @@ fun AppHost(appearanceViewModel: ScheduleAppearanceViewModel,
             val key = selectedCourseKey
             if (key != null && shownCourse != null && shownCourse.scheduleId == state.scheduleId) {
                 val group = state.courses.filter { it.name == shownCourse.name && it.source == shownCourse.source }.map { it.id }
+                val detailPage = state.pages.getOrNull((key.split(':').getOrNull(1)?.toIntOrNull() ?: 0) - 1)
                 CourseDetailOverlay(shownCourse, key,
                     sourceBounds = sources.bounds[key]?.takeIf {
                         it.width > 0f && it.height > 0f && course != null &&
-                            key == courseSourceKey(course, state.selectedWeek) && main == MainPage.SCHEDULE && page == null
+                            key == courseSourceKey(course, state.selectedPage + 1) && main == MainPage.SCHEDULE && page == null
                     },
                     sectionTimes = state.sectionTimes, fontScale = appearance.fontScale,
-                    sourceActive = shownCourse.hasClassOnWeek(key.split(':').getOrNull(1)?.toIntOrNull() ?: state.selectedWeek),
+                    sourceActive = if (detailPage?.monday == null) shownCourse.hasClassOnWeek(detailPage?.teachingWeek ?: 1)
+                        else (if (resolvedDetail != null) resolvedDetail.second else occurrenceSnapshot) != null,
+                    occurrence = if (resolvedDetail != null) resolvedDetail.second else occurrenceSnapshot,
                     onClosed = { selectedCourseKey = null }, onEdit = { editCourseId = shownCourse.id },
                     onHide = { schedule.setCoursesHidden(shownCourse.scheduleId, group, true) },
                     onDelete = { schedule.saveCourses(shownCourse.scheduleId, emptyList(), group) })

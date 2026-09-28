@@ -9,17 +9,21 @@ data class ScheduleAppearance(
     val imageScale: BackgroundScale = BackgroundScale.CROP,
     val overlayPercent: Int = 30,
     val blurDp: Int = 0,
+    val sectionHeightPercent: Int = 100,
 ) {
     val fontScale: Float get() = fontPercent / 100f
 
     fun normalized(): ScheduleAppearance = copy(
         fontPercent = ((fontPercent.coerceIn(80, 160) / 5f).roundToInt() * 5),
+        sectionHeightPercent = ((sectionHeightPercent.coerceIn(80, 160) / 5f).roundToInt() * 5),
         backgroundFile = backgroundFile.takeIf { BACKGROUND_NAME.matches(it) }.orEmpty(),
         overlayPercent = overlayPercent.coerceIn(0, 80),
         blurDp = blurDp.coerceIn(0, 24),
     )
 
-    fun withoutBackground(): ScheduleAppearance = ScheduleAppearance(fontPercent = fontPercent)
+    fun withoutBackground(): ScheduleAppearance = ScheduleAppearance(
+        fontPercent = fontPercent, sectionHeightPercent = sectionHeightPercent,
+    )
 
     companion object {
         private val BACKGROUND_NAME = Regex("[a-f0-9-]{36}\\.png")

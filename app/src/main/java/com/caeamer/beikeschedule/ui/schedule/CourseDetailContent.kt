@@ -30,6 +30,7 @@ internal fun CourseDetailContent(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onHide: () -> Unit,
+    occurrence: com.caeamer.beikeschedule.model.CourseOccurrence? = null,
 ) {
     val colors = MaterialTheme.colorScheme
     Column(
@@ -52,7 +53,12 @@ internal fun CourseDetailContent(
                         Text("$start – $end", style = MaterialTheme.typography.titleLarge, color = colors.onPrimaryContainer)
                     }
                 }
-                Text("周数：${WeekUtils.describe(course.weekBitmap)}", style = MaterialTheme.typography.bodyMedium,
+                if (occurrence?.isMakeup == true) {
+                    Text("补课日期：${occurrence.date}", color = colors.onPrimaryContainer)
+                    Text("原课程日期：${occurrence.sourceDate}", color = colors.onPrimaryContainer)
+                    if (occurrence.note.isNotBlank()) Text(occurrence.note, color = colors.onPrimaryContainer)
+                }
+                Text("${if (occurrence?.isMakeup == true) "原课程周数" else "周数"}：${WeekUtils.describe(course.weekBitmap)}", style = MaterialTheme.typography.bodyMedium,
                     color = colors.onPrimaryContainer)
             }
         }

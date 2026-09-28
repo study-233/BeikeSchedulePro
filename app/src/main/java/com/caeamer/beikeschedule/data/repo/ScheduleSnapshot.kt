@@ -12,4 +12,5 @@ data class ScheduleSnapshot(
     val scheduleId: Long = 1,
     val scheduleName: String = "默认课表",
     val reminderVersion: Long = 1,
+    val adjustments: com.caeamer.beikeschedule.model.CalendarAdjustments? = null,
 )

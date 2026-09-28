@@ -5,7 +5,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZonedDateTime
 
-/** 只做本地计算；使用严格教学周口径，不复用页面的“下一节课”语义。 */
+/** 只做本地计算；与课表共用日期排期，另保留正在上课和全天结束等 Widget 状态。 */
 object TodayScheduleResolver {
     fun resolve(snapshot: ScheduleSnapshot, now: ZonedDateTime): TodaySchedule {
         val date = now.toLocalDate()
@@ -20,21 +20,19 @@ object TodayScheduleResolver {
             parseDate(semester.firstMonday) != null && semester.totalWeeks > 0
         }
         if (!configured || snapshot.courses.isEmpty()) return empty(TodaySchedule.Status.NEEDS_SETUP)
-        val week = WeekResolver.teachingWeekOf(semester, date)
-            ?: return empty(TodaySchedule.Status.NON_TEACHING_DAY)
-        val today = CourseMerger.mergeSameSlot(
-            snapshot.courses.filter { !it.hidden && !it.isUnscheduled && it.dayOfWeek == date.dayOfWeek.value },
-        ).filter { it.hasClassOnWeek(week) }
-        if (today.isEmpty()) return empty(TodaySchedule.Status.NO_CLASSES)
+        val today = DateCourseResolver.resolve(snapshot.courses, semester, snapshot.adjustments, date)
+        if (today.isEmpty()) return empty(if (WeekResolver.teachingWeekOf(semester, date) == null)
+            TodaySchedule.Status.NON_TEACHING_DAY else TodaySchedule.Status.NO_CLASSES)
 
         val sections = snapshot.sectionTimes.associateBy { it.section }
         val boundaries = mutableListOf(midnight)
-        val remaining = today.mapNotNull { course ->
+        val remaining = today.mapNotNull { occurrence ->
+            val course = occurrence.displayCourse
             val start = parseTime(sections[course.startSection]?.startTime)
             val end = parseTime(sections[course.endSection]?.endTime)
             if (start == null || end == null || !end.isAfter(start) || course.endSection < course.startSection) {
                 // 不猜测缺失作息：保留节次提示，不能误报“今日课程已结束”。
-                TodayCourse(course, null, null, TodayCourse.Phase.UNKNOWN_TIME)
+                TodayCourse(course, null, null, TodayCourse.Phase.UNKNOWN_TIME, occurrence.isMakeup)
             } else {
                 val startsAt = date.atTime(start).atZone(now.zone)
                 val endsAt = date.atTime(end).atZone(now.zone)
@@ -42,8 +40,8 @@ object TodayScheduleResolver {
                 if (endsAt.isAfter(now)) boundaries += endsAt
                 when {
                     !now.isBefore(endsAt) -> null
-                    !now.isBefore(startsAt) -> TodayCourse(course, start, end, TodayCourse.Phase.ONGOING)
-                    else -> TodayCourse(course, start, end, TodayCourse.Phase.UPCOMING)
+                    !now.isBefore(startsAt) -> TodayCourse(course, start, end, TodayCourse.Phase.ONGOING, occurrence.isMakeup)
+                    else -> TodayCourse(course, start, end, TodayCourse.Phase.UPCOMING, occurrence.isMakeup)
                 }
             }
         }.sortedWith(

@@ -11,7 +11,6 @@ import com.caeamer.beikeschedule.data.pref.SettingsStore
 import com.caeamer.beikeschedule.data.repo.ScheduleRepository
 import com.caeamer.beikeschedule.model.ClassReminderIdentity
 import com.caeamer.beikeschedule.model.ReminderCourses
-import com.caeamer.beikeschedule.model.WeekResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -98,9 +97,9 @@ object ClassReminderScheduler {
                 val enabled = settings.reminderEnabled.first()
                 val minutes = settings.reminderMinutes.first()
                 val planned = if (enabled) {
-                    planClassReminders(reminderCourses(snapshot.courses),
+                    planClassReminders(snapshot.courses,
                         snapshot.sectionTimes.associate { it.section to it.startTime }, snapshot.semester,
-                        minutes, LocalDateTime.now(), ZoneId.systemDefault()).map {
+                        minutes, LocalDateTime.now(), ZoneId.systemDefault(), snapshot.adjustments).map {
                         it.copy(requestCode = Math.floorMod("${it.requestCode}@$identity".hashCode(), REQUEST_CODE_RANGE))
                     }
                 } else emptyList()
@@ -123,7 +122,7 @@ object ClassReminderScheduler {
     /**
      * 纯函数：算出未来 [SCHEDULE_DAYS] 天内要排的上课提醒。
      *
-     * - 只在"今天所属教学周"内匹配，开学前/假期跳周/学期后（teachingWeekOf 返回 null）不排；
+     * - 普通课程按当天教学周匹配；明确补课按来源日教学周匹配，允许落在假期周；
      * - 触发时刻 = 该节次开始时间 − 提前分钟数；
      * - 只排仍在未来的（过去的不排，避免一开 App 就补一堆过期提醒）；
      * - 节次时间缺失/格式异常的课程直接跳过，不影响其他课。
@@ -135,15 +134,14 @@ object ClassReminderScheduler {
         minutes: Int,
         now: LocalDateTime,
         zone: ZoneId = ZoneId.systemDefault(),
+        adjustments: com.caeamer.beikeschedule.model.CalendarAdjustments? = null,
     ): List<PlannedClassReminder> {
         val today = now.toLocalDate()
         val result = mutableListOf<PlannedClassReminder>()
         for (offset in 0 until SCHEDULE_DAYS) {
             val date = today.plusDays(offset.toLong())
-            val week = teachingWeekOf(semester, date) ?: continue
-            val dayOfWeek = date.dayOfWeek.value
-            courses.forEach { course ->
-                if (course.dayOfWeek != dayOfWeek || !course.hasClassOnWeek(week)) return@forEach
+            com.caeamer.beikeschedule.model.DateCourseResolver.resolve(courses, semester, adjustments, date).forEach { occurrence ->
+                val course = occurrence.course
                 val startTime = sectionStartTimes[course.startSection] ?: return@forEach
                 val start = runCatching { LocalTime.parse(startTime) }.getOrNull() ?: return@forEach
                 val trigger = LocalDateTime.of(date, start).minusMinutes(minutes.toLong())
@@ -151,7 +149,7 @@ object ClassReminderScheduler {
                 result += PlannedClassReminder(
                     requestCode = requestCodeOf(course, date),
                     triggerAtMillis = ReminderAlarmScheduler.toEpochMillis(trigger, zone),
-                    courseName = course.name,
+                    courseName = if (occurrence.isMakeup) "补课 · ${course.name}" else course.name,
                     location = course.location,
                     startTime = startTime,
                     minutes = minutes,
@@ -161,14 +159,6 @@ object ClassReminderScheduler {
         }
         return result
     }
-
-    /**
-     * 日期落在第几教学周；开学前/假期跳周/学期外都返回 null（那些天本来就没课）。
-     * 统一走 [WeekResolver.teachingWeekOf]：此前这里有一份拷贝，兜底路径会在开学前
-     * 6 天误判成"第 1 周"并为那些天排提醒。
-     */
-    private fun teachingWeekOf(semester: SettingsStore.SemesterConfig, date: LocalDate): Int? =
-        WeekResolver.teachingWeekOf(semester, date)
 
     /**
      * 提醒的 requestCode = hash(课程 id + 日期)，落在 [0, REQUEST_CODE_RANGE)。

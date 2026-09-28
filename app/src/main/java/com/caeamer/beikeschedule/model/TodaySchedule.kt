@@ -20,6 +20,7 @@ data class TodayCourse(
     val start: LocalTime?,
     val end: LocalTime?,
     val phase: Phase,
+    val isMakeup: Boolean = false,
 ) {
     enum class Phase { ONGOING, UPCOMING, UNKNOWN_TIME }
 }

@@ -47,6 +47,7 @@ internal fun WeekPickerSheet(
     currentWeekLabel: String,
     onSelectWeek: (Int) -> Unit,
     onDismissRequest: () -> Unit,
+    pageLabels: List<String> = (1..totalWeeks).map { "第 $it 周" },
 ) {
     val colors = MaterialTheme.colorScheme
     val gridMaxHeight = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
@@ -65,7 +66,7 @@ internal fun WeekPickerSheet(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("选择周次", style = MaterialTheme.typography.titleLarge)
-                    Text("正在查看第 $selectedWeek 周 · 共 $totalWeeks 周",
+                    Text("正在查看${pageLabels.getOrNull(selectedWeek - 1).orEmpty()}",
                         style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                 }
                 IconButton(onClick = onDismissRequest) { Icon(Icons.Default.Close, "关闭周次选择") }
@@ -106,7 +107,7 @@ internal fun WeekPickerSheet(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
                         ) {
-                            Text("第 $week 周", style = MaterialTheme.typography.titleMedium,
+                            Text(pageLabels.getOrNull(week - 1).orEmpty(), style = MaterialTheme.typography.titleMedium,
                                 color = if (selected) colors.onPrimary else colors.onSurface)
                             Text(label, style = MaterialTheme.typography.labelSmall,
                                 color = if (selected) colors.onPrimary else colors.primary)
@@ -117,9 +118,9 @@ internal fun WeekPickerSheet(
             if (currentWeek != null && currentWeek in 1..totalWeeks) {
                 TextButton(onClick = { onSelectWeek(currentWeek) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Text(when (currentWeekLabel) {
-                        "待开学" -> "查看开学周 · 第 $currentWeek 周"
-                        "假期后" -> "查看假期后教学周 · 第 $currentWeek 周"
-                        else -> "回到本周 · 第 $currentWeek 周"
+                        "待开学" -> "查看开学周 · ${pageLabels[currentWeek - 1]}"
+                        "假期后" -> "查看假期后教学周 · ${pageLabels[currentWeek - 1]}"
+                        else -> "回到本周 · ${pageLabels[currentWeek - 1]}"
                     })
                 }
             }

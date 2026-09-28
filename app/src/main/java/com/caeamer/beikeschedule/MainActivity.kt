@@ -42,6 +42,14 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         WidgetUpdateCoordinator.requestRefresh(applicationContext)
+        lifecycleScope.launch {
+            try {
+                com.caeamer.beikeschedule.data.repo.CalendarAdjustmentRepository.get(applicationContext).refresh()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                // 本地存储不可用时不阻断启动；设置页手动刷新可重试。
+            }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

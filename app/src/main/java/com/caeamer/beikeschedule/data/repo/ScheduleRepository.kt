@@ -87,6 +87,9 @@ class ScheduleRepository internal constructor(
         details.courses.sortedWith(compareBy({ it.dayOfWeek }, { it.startSection }, { it.id })),
         details.sections.sortedBy { it.section }, details.schedule.semester(),
         details.schedule.id, details.schedule.name, state.reminderVersion,
+        adjustmentCache.firstOrNull()?.body?.takeIf { it.isNotBlank() }?.let {
+            runCatching { com.caeamer.beikeschedule.model.CalendarAdjustmentCodec.parse(it) }.getOrNull()
+        },
     )
 
     suspend fun getScheduleSnapshot(): ScheduleSnapshot {
@@ -162,11 +165,13 @@ class ScheduleRepository internal constructor(
 
     suspend fun saveSemester(id: Long, config: SettingsStore.SemesterConfig) = write {
         scheduleDao.update(requireSchedule(id).withSemester(config))
+        invalidateIfCurrent(id)
     }
 
     suspend fun saveSemesterDraft(id: Long, draft: com.caeamer.beikeschedule.model.SemesterDraft) = write {
         val schedule = requireSchedule(id)
         scheduleDao.update(schedule.withSemester(draft.applyTo(schedule.semester())))
+        invalidateIfCurrent(id)
     }
 
     suspend fun replaceGrades(grades: List<GradeEntity>) = db.withTransaction {

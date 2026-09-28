@@ -10,6 +10,10 @@ import com.caeamer.beikeschedule.data.pref.SettingsStore
 import com.caeamer.beikeschedule.data.repo.ScheduleRepository
 import com.caeamer.beikeschedule.import.parser.JwParser
 import com.caeamer.beikeschedule.model.WeekResolver
+import com.caeamer.beikeschedule.model.DateCourseResolver
+import com.caeamer.beikeschedule.model.CalendarAdjustments
+import com.caeamer.beikeschedule.model.ScheduleWeekPage
+import com.caeamer.beikeschedule.data.repo.CalendarAdjustmentRepository
 import com.caeamer.beikeschedule.reminder.ClassReminderScheduler
 import com.caeamer.beikeschedule.widget.WidgetUpdateCoordinator
 import kotlinx.coroutines.CancellationException
@@ -43,6 +47,11 @@ data class ScheduleUiState(
     /** 学期已结束（currentWeek=null）。 */
     val afterEnd: Boolean = false,
     val loaded: Boolean = false,
+    val adjustments: CalendarAdjustments? = null,
+    val adjustmentError: String? = null,
+    val pages: List<ScheduleWeekPage> = emptyList(),
+    val selectedPage: Int = 0,
+    val currentPage: Int? = null,
 ) {
     /**
      * 未隐藏的有固定时间课程。
@@ -71,6 +80,21 @@ data class ReminderScheduleInfo(
 class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = ScheduleRepository(app)
+    private val adjustmentRepo = CalendarAdjustmentRepository.get(app)
+    val adjustmentStatus = adjustmentRepo.status.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    private val refreshingAdjustmentsState = MutableStateFlow(false)
+    val refreshingAdjustments: StateFlow<Boolean> = refreshingAdjustmentsState
+    fun refreshAdjustments() {
+        if (refreshingAdjustmentsState.value) return
+        refreshingAdjustmentsState.value = true
+        viewModelScope.launch {
+            try { adjustmentRepo.refresh(force = true) }
+            catch (e: Exception) {
+                if (e is CancellationException) throw e
+                settingsErrorState.value = "调休配置读取失败，请稍后重试"
+            } finally { refreshingAdjustmentsState.value = false }
+        }
+    }
     private val settingsErrorState = MutableStateFlow<String?>(null)
     val settingsError: StateFlow<String?> = settingsErrorState
     private val savingSemesterState = MutableStateFlow(false)
@@ -140,14 +164,18 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
     val uiState: StateFlow<ScheduleUiState> = combine(snapshot, selectedWeek, sessionEpoch) { data, selection, _ ->
         val semester = data.semester
         val location = WeekResolver.locateWeek(semester)
-        val week = selection?.takeIf { it.first == data.scheduleId && it.second == data.reminderVersion }?.third
-        val resolved = week ?: WeekResolver.defaultWeek(location, semester.totalWeeks)
+        val pages = DateCourseResolver.pages(semester, data.adjustments)
+        val selected = selection?.takeIf { it.first == data.scheduleId && it.second == data.reminderVersion }?.third
+        val currentPage = DateCourseResolver.defaultPage(pages, semester, java.time.LocalDate.now())
+        val resolved = (selected ?: currentPage).coerceIn(pages.indices)
         ScheduleUiState(
             scheduleId = data.scheduleId, scheduleName = data.scheduleName, scheduleVersion = data.reminderVersion,
             courses = data.courses, sectionTimes = data.sectionTimes, semester = semester,
-            selectedWeek = resolved.coerceIn(1, semester.totalWeeks), currentWeek = location.week,
+            selectedWeek = pages[resolved].teachingWeek ?: 0, currentWeek = location.week,
             inHoliday = location.isHoliday, nextWeekMonday = location.nextWeekMonday,
             beforeStart = location.beforeStart, afterEnd = location.afterEnd, loaded = true,
+            adjustments = data.adjustments, adjustmentError = DateCourseResolver.applicable(semester, data.adjustments).error,
+            pages = pages, selectedPage = resolved, currentPage = currentPage,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScheduleUiState())
 
@@ -247,7 +275,9 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
     fun showCurrentWeek() {
         changeSetting {
             val data = repo.getScheduleSnapshot()
-            selectedWeek.value = Triple(data.scheduleId, data.reminderVersion, WeekResolver.defaultWeek(WeekResolver.locateWeek(data.semester), data.semester.totalWeeks))
+            val pages = DateCourseResolver.pages(data.semester, data.adjustments)
+            selectedWeek.value = Triple(data.scheduleId, data.reminderVersion,
+                DateCourseResolver.defaultPage(pages, data.semester, java.time.LocalDate.now()))
         }
     }
 
@@ -257,7 +287,13 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectWeek(week: Int) {
         val state = uiState.value
-        if (state.loaded) selectedWeek.value = Triple(state.scheduleId, state.scheduleVersion, week)
+        val page = state.pages.indexOfFirst { it.teachingWeek == week }
+        if (page >= 0) selectPage(page)
+    }
+
+    fun selectPage(page: Int) {
+        val state = uiState.value
+        if (state.loaded && page in state.pages.indices) selectedWeek.value = Triple(state.scheduleId, state.scheduleVersion, page)
     }
 
     fun saveCourses(scheduleId: Long, courses: List<CourseEntity>, replaceIds: List<Long>?, onSaved: () -> Unit = {}) {

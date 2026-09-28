@@ -63,7 +63,8 @@ internal fun CourseDetailOverlay(course: CourseEntity, sourceKey: String, source
                                  sectionTimes: List<SectionTimeEntity>, fontScale: Float,
                                  onClosed: () -> Unit, onEdit: () -> Unit,
                                  onHide: () -> Unit, onDelete: () -> Unit,
-                                 sourceActive: Boolean = true) {
+                                 sourceActive: Boolean = true,
+                                 occurrence: com.caeamer.beikeschedule.model.CourseOccurrence? = null) {
     val progress = remember(sourceKey) { Animatable(0f) }
     var fadeOnly by remember(sourceKey) { mutableStateOf(false) }
     var expanded by remember(sourceKey) { mutableStateOf(true) }
@@ -174,6 +175,7 @@ internal fun CourseDetailOverlay(course: CourseEntity, sourceKey: String, source
                     }
                     Column(Modifier.weight(1f, fill = false).verticalScroll(scroll)) {
                         CourseDetailContent(course, sectionTimes,
+                            occurrence = occurrence,
                             onEdit = { afterClose = onEdit; dismiss() },
                             onHide = { fadeOnly = true; onHide(); dismiss() }, onDelete = { fadeOnly = true; onDelete(); dismiss() })
                     }
@@ -186,7 +188,8 @@ internal fun CourseDetailOverlay(course: CourseEntity, sourceKey: String, source
                     .width(with(density) { rect.width.toDp() }).height(with(density) { rect.height.toDp() })
                     .alpha(1f - progress.value),
                 shape = RoundedCornerShape((6 + 14 * progress.value).dp), color = cardColor,
-            ) { CourseCardText(course, cardColors.title, fontScale, cardColors.location, cardColors.detail) }
+            ) { CourseCardText(if (occurrence?.isMakeup == true) course.copy(name = "补课 · ${course.name}") else course,
+                cardColors.title, fontScale, cardColors.location, cardColors.detail) }
         }
     }
 }

@@ -66,16 +66,21 @@ fun ScheduleAppearanceContent(
                 error?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
             } else {
                 var font by rememberSaveable(appearance.fontPercent) { mutableIntStateOf(appearance.fontPercent) }
+                var sectionHeight by rememberSaveable(appearance.sectionHeightPercent) { mutableIntStateOf(appearance.sectionHeightPercent) }
                 var overlay by rememberSaveable(appearance.overlayPercent) { mutableIntStateOf(appearance.overlayPercent) }
                 var blur by rememberSaveable(appearance.blurDp) { mutableIntStateOf(appearance.blurDp) }
                 LaunchedEffect(error) {
                     if (error != null) {
                         font = appearance.fontPercent
+                        sectionHeight = appearance.sectionHeightPercent
                         overlay = appearance.overlayPercent
                         blur = appearance.blurDp
                     }
                 }
-                val preview = appearance.copy(fontPercent = font, overlayPercent = overlay, blurDp = blur)
+                val preview = appearance.copy(
+                    fontPercent = font, sectionHeightPercent = sectionHeight,
+                    overlayPercent = overlay, blurDp = blur,
+                )
                 val image = rememberScheduleBackground(appearance.backgroundFile)
                 Column(
                     Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
@@ -99,7 +104,16 @@ fun ScheduleAppearanceContent(
                     TextButton(onClick = { font = 100; viewModel.setFont(100) }, enabled = !importing) {
                         Text("恢复默认字号")
                     }
-                    Text("课名随字号调整，教室、教师与单双周标记以较缓幅度缩放；大字号时可上下滑动课表。", style = MaterialTheme.typography.bodySmall)
+                    Text("课名随字号调整，教室、教师与单双周标记以较缓幅度缩放。", style = MaterialTheme.typography.bodySmall)
+                    AppearanceSlider(
+                        "节次高度", "$sectionHeight%", sectionHeight, 80..160, steps = 15, enabled = !importing,
+                        onChange = { sectionHeight = (it / 5f).roundToInt() * 5 },
+                        onFinished = { viewModel.setSectionHeight(sectionHeight) },
+                    )
+                    TextButton(onClick = { sectionHeight = 100; viewModel.setSectionHeight(100) }, enabled = !importing) {
+                        Text("适应一屏")
+                    }
+                    Text("优先保留教室信息；空间不足时课名省略，必要时仍可上下滑动。", style = MaterialTheme.typography.bodySmall)
                     HorizontalDivider()
                     Text("背景图片", style = MaterialTheme.typography.titleMedium)
                     OutlinedButton(

@@ -89,7 +89,9 @@ import com.caeamer.beikeschedule.model.NextClass
 import com.caeamer.beikeschedule.model.SectionMap
 import com.caeamer.beikeschedule.model.SessionExpander
 import com.caeamer.beikeschedule.model.WeekLayout
-import com.caeamer.beikeschedule.model.WeekResolver
+import com.caeamer.beikeschedule.model.DateCourseResolver
+import com.caeamer.beikeschedule.model.ScheduleWeekPage
+import com.caeamer.beikeschedule.model.CalendarAdjustments
 import com.caeamer.beikeschedule.model.WeekUtils
 import com.caeamer.beikeschedule.ui.common.rememberNow
 import com.caeamer.beikeschedule.ui.theme.CourseColors
@@ -104,10 +106,6 @@ private val WEEKDAY_NAMES = listOf("一", "二", "三", "四", "五", "六", "�
  */
 private const val SCROLLABLE_SHEET_MIN_ITEMS = 5
 
-
-/** 日期所属教学周（严格口径：开学前/假期跳周/学期后返回 null），与提醒排期同一套判定。 */
-private fun teachingWeekOf(semester: SettingsStore.SemesterConfig, date: LocalDate): Int? =
-    WeekResolver.teachingWeekOf(semester, date)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -162,7 +160,6 @@ fun ScheduleScreen(
         pendingSlot = null
     }
     val totalWeeks = state.semester.totalWeeks
-    val visibleDays = if (hideWeekend) (1..5).toList() else (1..7).toList()
 
     /**
      * 取某张卡片对应的**全部存储行**（同课程名 + 同来源）。
@@ -192,24 +189,27 @@ fun ScheduleScreen(
             .map { it.name.trim() }
             .toSet()
     }
-    // 下一节课：仅今天（严格教学周内）尚未开始的最早一节；卡片 id 与合并后课程一致
-    val nextClassId = remember(state.scheduledCourses, state.sectionTimes, now, state.semester) {
+    // 下一节课使用实际日期，包含校历假期中的明确补课；卡片 id 与当天合并结果一致。
+    val nextClass = remember(state.scheduledCourses, state.sectionTimes, now, state.semester, state.adjustments) {
         NextClass.resolve(
-            courses = CourseMerger.mergeSameSlot(state.scheduledCourses),
+            occurrences = DateCourseResolver.resolve(state.scheduledCourses, state.semester, state.adjustments, now.toLocalDate()),
             sectionStartTimes = state.sectionTimes.associate { it.section to it.startTime },
-            todayTeachingWeek = teachingWeekOf(state.semester, now.toLocalDate()),
+            semester = state.semester,
             now = now,
-        )?.courseId
+        )
     }
     val schedulePager = key(state.scheduleId, state.scheduleVersion) { rememberSchedulePager(
         loaded = state.loaded,
-        selectedWeek = state.selectedWeek,
-        totalWeeks = totalWeeks,
-        onWeekSelected = viewModel::selectWeek,
+        selectedWeek = state.selectedPage + 1,
+        totalWeeks = state.pages.size,
+        onWeekSelected = { viewModel.selectPage(it - 1) },
     ) }
     val pagerState = schedulePager.state
     val pagerReady = schedulePager.ready
-    val displayedWeek = if (pagerReady) pagerState.currentPage + 1 else state.selectedWeek
+    val displayedPage = if (pagerReady) pagerState.currentPage else state.selectedPage
+    val pageInfo = state.pages.getOrNull(displayedPage) ?: ScheduleWeekPage(null, 1)
+    val visibleDays = DateCourseResolver.visibleDays(pageInfo, state.semester, state.adjustments, hideWeekend)
+    LaunchedEffect(displayedPage) { pendingSlot = null }
 
     Scaffold(
         modifier = Modifier.background(SolidColor(Color.Transparent)),
@@ -249,7 +249,7 @@ fun ScheduleScreen(
                     }
                     Spacer(Modifier.width(2.dp))
                     TextButton(onClick = { weekMenuExpanded = true }, enabled = state.loaded) {
-                        Text("第${displayedWeek}周")
+                        Text(pageInfo.label)
                         Icon(
                             Icons.Default.ArrowDropDown,
                             contentDescription = "选择周次",
@@ -257,13 +257,13 @@ fun ScheduleScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    if (state.currentWeek != null && displayedWeek != state.currentWeek) {
+                    if (state.currentPage != null && displayedPage != state.currentPage) {
                         IconButton(onClick = {
-                            viewModel.selectWeek(state.currentWeek!!)
+                            viewModel.showCurrentWeek()
                         }) {
                             Icon(Icons.Default.DateRange, contentDescription = when {
                                 state.beforeStart -> "查看开学周"
-                                state.inHoliday -> "查看假期后教学周"
+                                state.inHoliday && state.pages.getOrNull(state.currentPage ?: -1)?.teachingWeek != null -> "查看假期后教学周"
                                 else -> "回到本周"
                             })
                         }
@@ -304,13 +304,14 @@ fun ScheduleScreen(
             } else {
                 Surface(color = chromeColor) {
                     DateRow(
-                        week = displayedWeek,
+                        page = pageInfo,
                         semester = state.semester,
+                        adjustments = state.adjustments,
                         today = now.toLocalDate(),
                         days = visibleDays,
                     )
                 }
-                if (state.inHoliday && state.nextWeekMonday != null) {
+                if (state.inHoliday && state.nextWeekMonday != null && !pageInfo.contains(now.toLocalDate())) {
                     Surface(color = MaterialTheme.colorScheme.tertiaryContainer) {
                         Text(
                             "假期中 · ${state.nextWeekMonday} 进入第${state.currentWeek}周",
@@ -320,24 +321,30 @@ fun ScheduleScreen(
                         )
                     }
                 }
+                state.adjustmentError?.let { Text(it, Modifier.padding(horizontal = 12.dp),
+                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.weight(1f),
                 ) { page ->
                     WeekGrid(
                         week = page + 1,
+                        page = state.pages[page],
+                        semester = state.semester,
+                        adjustments = state.adjustments,
                         courses = state.scheduledCourses,
                         sectionTimes = state.sectionTimes,
-                        days = visibleDays,
+                        days = DateCourseResolver.visibleDays(state.pages[page], state.semester, state.adjustments, hideWeekend),
                         pendingSlot = pendingSlot,
-                        // 只在用户正看"今天所在教学周"时标记，翻到其他周不误导
-                        nextClassId = nextClassId.takeIf { page + 1 == teachingWeekOf(state.semester, now.toLocalDate()) },
+                        // 只在用户正看今天所在的日期页时标记。
+                        nextClassId = nextClass?.courseId.takeIf { state.pages[page].contains(now.toLocalDate()) },
+                        nextClassDay = nextClass?.dayOfWeek,
                         hideInactiveCourses = hideInactiveCourses,
                         appearance = appearance,
                         cardMeasurer = cardMeasurer,
-                        onSlotLongPress = { day, big -> pendingSlot = day to big },
+                        onSlotLongPress = { day, big -> if (state.pages[page].teachingWeek != null) pendingSlot = day to big },
                         onSlotClick = { day, big ->
-                            if (pendingSlot == day to big) {
+                            if (state.pages[page].teachingWeek != null && pendingSlot == day to big) {
                                 prefillSession = SessionExpander.Session(day, setOf(big))
                                 editingScheduleId = state.scheduleId; showEditDialog = true
                             }
@@ -352,18 +359,20 @@ fun ScheduleScreen(
 
     if (weekMenuExpanded && state.loaded) {
         WeekPickerSheet(
-            totalWeeks = totalWeeks,
-            selectedWeek = displayedWeek,
-            currentWeek = state.currentWeek,
+            totalWeeks = state.pages.size,
+            selectedWeek = displayedPage + 1,
+            currentWeek = state.currentPage?.plus(1),
+            pageLabels = state.pages.map { if (it.teachingWeek == null) "${it.label}\n${it.dateRange}" else it.label },
             currentWeekLabel = when {
+                state.pages.getOrNull(state.currentPage ?: -1)?.teachingWeek == null -> "本周"
                 state.beforeStart -> "待开学"
-                state.inHoliday -> "假期后"
+                state.inHoliday && state.pages.getOrNull(state.currentPage ?: -1)?.teachingWeek != null -> "假期后"
                 else -> "本周"
             },
             onSelectWeek = { week ->
                 weekMenuExpanded = false
                 // 离散选周直接定位；也适用于没有挂载 Pager 的空课表。
-                viewModel.selectWeek(week)
+                viewModel.selectPage(week - 1)
             },
             onDismissRequest = { weekMenuExpanded = false },
         )
@@ -434,6 +443,7 @@ private fun EmptyState(onLoadSample: () -> Unit, onImportClick: () -> Unit, onAd
 private fun todayStatusLine(state: ScheduleUiState, today: LocalDate): String {
     val dateText = "${today.monthValue}月${today.dayOfMonth}日 周${"一二三四五六日"[today.dayOfWeek.value - 1]}"
     val status = when {
+        state.pages.getOrNull(state.currentPage ?: -1)?.let { it.teachingWeek == null && it.contains(today) } == true -> "调休周"
         // locateWeek 的显示语义"未开学视为第1周"用 beforeStart 区分，不能只看 currentWeek
         state.beforeStart -> "未开学"
         state.inHoliday -> "假期中"
@@ -444,11 +454,12 @@ private fun todayStatusLine(state: ScheduleUiState, today: LocalDate): String {
     return "$dateText · $status"
 }
 
-/** 顶部日期行：左格对齐节次列，N 天列；周一日期统一走 WeekResolver.weekMonday（校历优先，
- *  非周一开学日期会被归一化，见那里的注释），今天用主题色实心胶囊高亮。 */
+/** 日期行使用页面的真实周一；额外调休周不借用来源日期，今天优先高亮。 */
 @Composable
-private fun DateRow(week: Int, semester: SettingsStore.SemesterConfig, today: LocalDate, days: List<Int>) {
-    val monday = remember(semester, week) { WeekResolver.weekMonday(semester, week) }
+private fun DateRow(page: ScheduleWeekPage, semester: SettingsStore.SemesterConfig,
+                    adjustments: CalendarAdjustments?, today: LocalDate, days: List<Int>) {
+    val monday = page.monday
+    val rules = remember(semester, adjustments) { DateCourseResolver.applicable(semester, adjustments).rules }
     val holidayDates = remember(semester.holidayDates) { semester.holidayDates.toSet() }
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Spacer(Modifier.width(SECTION_COL_WIDTH))
@@ -456,6 +467,7 @@ private fun DateRow(week: Int, semester: SettingsStore.SemesterConfig, today: Lo
             val date = monday?.plusDays((day - 1).toLong())
             val isToday = date == today
             val isHoliday = date != null && date.toString() in holidayDates
+            val isMakeup = rules?.extraClasses?.any { it.date == date?.toString() } == true
             Column(
                 modifier = Modifier.weight(1f).padding(horizontal = 1.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -465,6 +477,7 @@ private fun DateRow(week: Int, semester: SettingsStore.SemesterConfig, today: Lo
                     modifier = Modifier.background(
                         when {
                             isToday -> MaterialTheme.colorScheme.primary
+                            isMakeup -> MaterialTheme.colorScheme.tertiaryContainer
                             isHoliday -> MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
                             else -> Color.Transparent
                         },
@@ -486,6 +499,8 @@ private fun DateRow(week: Int, semester: SettingsStore.SemesterConfig, today: Lo
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    if (isMakeup) Text("补课", fontSize = 9.sp,
+                        color = if (isToday) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onTertiaryContainer)
                 }
             }
         }
@@ -499,12 +514,16 @@ private val SECTION_COL_WIDTH = CourseCardLayout.TIME_COLUMN_WIDTH.dp
 @Composable
 private fun WeekGrid(
     week: Int,
+    page: ScheduleWeekPage,
+    semester: SettingsStore.SemesterConfig,
+    adjustments: CalendarAdjustments?,
     courses: List<CourseEntity>,
     sectionTimes: List<SectionTimeEntity>,
     days: List<Int>,
     pendingSlot: Pair<Int, Int>?,
-    /** 下一节课的卡片 id（null=不标记）；仅当本页正是今天所在教学周时由调用方传入。 */
+    /** 下一节课的卡片 id（null=不标记）；仅当本页包含今天时传入。 */
     nextClassId: Long?,
+    nextClassDay: Int?,
     /** 开启后不再显示"本周暂时不上"的淡化课（设置页开关）。 */
     hideInactiveCourses: Boolean,
     appearance: ScheduleAppearance,
@@ -514,28 +533,43 @@ private fun WeekGrid(
     onCourseClick: (CourseEntity) -> Unit,
 ) {
     val timeMap = remember(sectionTimes) { sectionTimes.associateBy { it.section } }
-    // 同名同段多行（教务单周调课/单双周拆分）先合并成一张卡，再进冲突聚类
-    val mergedCourses = remember(courses) { CourseMerger.mergeSameSlot(courses) }
-    val dayLayouts = remember(mergedCourses, days, week, hideInactiveCourses) {
-        days.associateWith { WeekLayout.layoutDay(mergedCourses, it, week, hideInactiveCourses) }
+    val occurrences = remember(courses, days, page, semester, adjustments) {
+        days.associateWith { day -> page.monday?.plusDays(day - 1L)?.let {
+            DateCourseResolver.resolve(courses, semester, adjustments, it)
+        }.orEmpty() }
     }
+    val dayLayouts = remember(occurrences, courses, days, page, semester, adjustments, hideInactiveCourses) {
+        days.associateWith { day ->
+            if (page.monday == null) return@associateWith WeekLayout.layoutDay(
+                courses.groupBy { it.source }.values.flatMap(CourseMerger::mergeSameSlot),
+                day, page.teachingWeek ?: 1, hideInactiveCourses)
+            val inactive = if (hideInactiveCourses) emptyList() else page.monday?.plusDays(day - 1L)?.let {
+                DateCourseResolver.inactive(courses, semester, adjustments, it)
+            }.orEmpty()
+            WeekLayout.layoutResolved(occurrences.getValue(day).map { it.displayCourse }, inactive)
+        }
+    }
+    val makeupIds = remember(occurrences) { occurrences.mapValues { (_, items) -> items.filter { it.isMakeup }.map { it.course.id }.toSet() } }
     val density = LocalDensity.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // weight 列分配存在 1px 舍入，取较窄列宽测量，确保任何列都不会少算行数。
         val dayWidthPx = (constraints.maxWidth - with(density) { SECTION_COL_WIDTH.roundToPx() }) / days.size
         val outerGapPx = with(density) { CourseCardLayout.OUTER_GAP.dp.roundToPx() } * 2
-        val minimumUnit = remember(dayLayouts, dayWidthPx, outerGapPx, cardMeasurer) {
+        val minimumUnit = remember(dayLayouts, makeupIds, dayWidthPx, outerGapPx, cardMeasurer) {
             val measurements = dayLayouts.values.flatMap { day ->
                 day.clusters.flatMap { cluster ->
-                    cluster.map { cardMeasurer.measure(it, (dayWidthPx / cluster.size - outerGapPx).coerceAtLeast(1)) }
+                    cluster.map { cardMeasurer.measure(if (it.id in makeupIds[it.dayOfWeek].orEmpty()) it.copy(name = "补课 · ${it.name}") else it,
+                        (dayWidthPx / cluster.size - outerGapPx).coerceAtLeast(1)) }
                 } + day.inactives.map { cardMeasurer.measure(it, (dayWidthPx - outerGapPx).coerceAtLeast(1)) }
             }
             CourseCardLayout.minimumUnitHeight(measurements).dp
         }
-        val gridHeight = maxOf(
-            maxHeight,
-            minimumUnit * SectionMap.TOTAL_SMALL_SECTIONS,
-        )
+        val minimumTimeUnit = remember(sectionTimes, cardMeasurer) {
+            cardMeasurer.minimumTimeUnitHeight(sectionTimes).dp
+        }
+        val gridHeight = CourseCardLayout.gridHeight(
+            maxHeight.value, appearance.sectionHeightPercent, maxOf(minimumUnit, minimumTimeUnit).value,
+        ).dp
         // 显式有限高度供课程绝对定位使用；日期栏在滚动容器之外，背景由宿主固定铺底。
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth().height(gridHeight)) {
@@ -553,12 +587,15 @@ private fun WeekGrid(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
                         ) {
-                            Text(SectionMap.BIG_NAMES[index], fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(SectionMap.BIG_NAMES[index], style = SectionColumnTypography.label,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             timeMap[range.first]?.let {
-                                Text(it.startTime, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(it.startTime, style = SectionColumnTypography.time,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             timeMap[range.last]?.let {
-                                Text(it.endTime, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(it.endTime, style = SectionColumnTypography.time,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -577,12 +614,13 @@ private fun WeekGrid(
                                         .weight(range.count().toFloat())
                                         .fillMaxWidth()
                                         .combinedClickable(
+                                            enabled = page.teachingWeek != null,
                                             onClick = { onSlotClick(day, big) },
                                             onLongClick = { onSlotLongPress(day, big) },
                                         ),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    if (pendingSlot == day to big) {
+                                    if (page.teachingWeek != null && pendingSlot == day to big) {
                                         Surface(
                                             color = MaterialTheme.colorScheme.primaryContainer,
                                             shape = RoundedCornerShape(20.dp),
@@ -622,7 +660,8 @@ private fun WeekGrid(
                                             week = week,
                                             active = true,
                                             fontScale = appearance.fontScale,
-                                            isNext = course.id == nextClassId,
+                                            isNext = course.id == nextClassId && day == nextClassDay,
+                                            isMakeup = course.id in makeupIds[day].orEmpty(),
                                             onClick = { onCourseClick(course) },
                                         )
                                     }
@@ -655,6 +694,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CourseCard(
     fontScale: Float,
     /** 是否为下一节课：细描边和右上角蓝点，不挤占标题宽度。 */
     isNext: Boolean,
+    isMakeup: Boolean = false,
     onClick: () -> Unit,
 ) {
     val sources = LocalCourseSources.current
@@ -688,13 +728,15 @@ private fun androidx.compose.foundation.layout.BoxScope.CourseCard(
                 .semantics {
                     stateDescription = when {
                         isNext -> "下一节课"
+                        isMakeup -> "调休补课"
                         !active -> "非本周课程"
                         else -> "本周课程"
                     }
                 }
                 .clickable(interactionSource = interaction, indication = null, onClick = onClick),
         ) {
-            CourseCardText(course, colors.title, fontScale, colors.location, colors.detail)
+            CourseCardText(if (isMakeup) course.copy(name = "补课 · ${course.name}") else course,
+                colors.title, fontScale, colors.location, colors.detail)
         }
         // 蓝点放在上边缘，不再为整段标题预留 15dp；“下一节课”由卡片语义播报。
         if (isNext) {

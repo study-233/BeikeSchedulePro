@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CourseEntity::class, SectionTimeEntity::class, GradeEntity::class, ExamEntity::class, TodoEntity::class, ScheduleEntity::class, ScheduleStateEntity::class, NoticeEntity::class, NoticeFeedEntity::class],
-    version = 9,
+    entities = [CourseEntity::class, SectionTimeEntity::class, GradeEntity::class, ExamEntity::class, TodoEntity::class, ScheduleEntity::class, ScheduleStateEntity::class, NoticeEntity::class, NoticeFeedEntity::class, CalendarAdjustmentCache::class],
+    version = 10,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -21,6 +21,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun examDao(): ExamDao
     abstract fun todoDao(): TodoDao
     abstract fun noticeDao(): NoticeDao
+    abstract fun calendarAdjustmentDao(): CalendarAdjustmentDao
 
     companion object {
         /** v1 → v2：新增 grade 表（课程/节次数据原样保留）。 */
@@ -120,6 +121,12 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var instance: AppDatabase? = null
 
+        val MIGRATE_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS calendar_adjustment_cache (id INTEGER NOT NULL PRIMARY KEY, body TEXT NOT NULL, lastCheckedAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, status TEXT NOT NULL)")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -127,7 +134,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "beike_schedule.db",
                 )
-                    .addMigrations(MIGRATE_1_2, MIGRATE_2_3, MIGRATE_3_4, MIGRATE_4_5, MIGRATE_5_6, MIGRATE_6_7, MIGRATE_7_8, MIGRATE_8_9)
+                    .addMigrations(MIGRATE_1_2, MIGRATE_2_3, MIGRATE_3_4, MIGRATE_4_5, MIGRATE_5_6, MIGRATE_6_7, MIGRATE_7_8, MIGRATE_8_9, MIGRATE_9_10)
                     // 迁移失败的兜底保险丝。
                     //
                     // **只兜"找不到迁移路径"这一种情况**（Room 的 fallbackToDestructiveMigration

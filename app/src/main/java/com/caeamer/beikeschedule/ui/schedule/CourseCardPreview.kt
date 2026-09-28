@@ -29,7 +29,10 @@ internal fun CourseCardPreview(appearance: ScheduleAppearance, gridWidthPx: Int,
             measurer.measure(course, (dayWidth / (if (index < 2) 1 else 2)) - gap)
         }
     }
-    val height = (CourseCardLayout.minimumUnitHeight(measurements) * 2).coerceAtLeast(96f).dp
+    // 96dp 为示例大节在 100% 时的参考高度；与主网格使用同一压缩下限。
+    val height = (CourseCardLayout.gridHeight(
+        96f * 6, appearance.sectionHeightPercent, CourseCardLayout.minimumUnitHeight(measurements),
+    ) / 6).dp
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), shape = RoundedCornerShape(8.dp)) {

@@ -32,12 +32,56 @@ class CourseCardLayoutTest {
         assertEquals(2, CourseCardLayout.detailLines(course))
     }
 
-    @Test fun `按实际标题高度计算而非一律预留最大行数`() {
+    @Test fun `地点在楼名与房间号之间拆分并保留房间号格式`() {
+        val cases = mapOf(
+            "机械楼720" to "机械楼\n720",
+            "逸夫楼402" to "逸夫楼\n402",
+            "教学楼A-301" to "教学楼\nA-301",
+            "信息楼301B" to "信息楼\n301B",
+            "教学楼 301室" to "教学楼\n301室",
+            "体育馆102" to "体育馆\n102",
+            "材料科学与工程实验楼A101" to "材料科学与工程实验楼\nA101",
+        )
+        cases.forEach { (location, expected) ->
+            assertEquals(expected, CourseCardLayout.locationForWrapping(location))
+        }
+        assertEquals("教学楼\n301", CourseCardLayout.locationForWrapping(CourseCardLayout.location(course)))
+        assertEquals("【校本部】教学楼301", course.location)
+    }
+
+    @Test fun `无法可靠拆分的地点及已有换行保留原文`() {
+        listOf("", "操场", "机械楼", "教学楼A座", "教学楼A座301", "A301", "实验中心302", "逸夫楼\n402").forEach {
+            assertEquals(it, CourseCardLayout.locationForWrapping(it))
+        }
+    }
+
+    @Test fun `最小高度预留一行标题和完整辅助信息`() {
         val short = CourseCardLayout.Measurement(2, 15f, 26f)
-        val long = CourseCardLayout.Measurement(2, 60f, 26f)
-        assertEquals(45f, long.cardHeight - short.cardHeight, 0.001f)
+        val longLocation = CourseCardLayout.Measurement(2, 15f, 65f)
+        assertEquals(39f, longLocation.cardHeight - short.cardHeight, 0.001f)
         val emptyDetails = CourseCardLayout.Measurement(2, 15f, 0f)
         assertEquals(26f + CourseCardLayout.DETAIL_GAP, short.cardHeight - emptyDetails.cardHeight, 0.001f)
+    }
+
+    @Test fun `默认适应一屏且手动高度按可用区域缩放`() {
+        assertEquals(600f, CourseCardLayout.gridHeight(600f, 100, 20f), 0.001f)
+        assertEquals(480f, CourseCardLayout.gridHeight(600f, 80, 20f), 0.001f)
+        assertEquals(960f, CourseCardLayout.gridHeight(600f, 160, 20f), 0.001f)
+        assertEquals(400f, CourseCardLayout.gridHeight(400f, 100, 20f), 0.001f)
+    }
+
+    @Test fun `必要信息超过目标高度时允许滚动并保留跨节比例`() {
+        val measured = listOf(CourseCardLayout.Measurement(1, 24f, 70f),
+            CourseCardLayout.Measurement(2, 24f, 45f), CourseCardLayout.Measurement(4, 24f, 30f))
+        val minimum = CourseCardLayout.minimumUnitHeight(measured)
+        val grid = CourseCardLayout.gridHeight(600f, 80, minimum)
+        assertTrue(grid > 600f)
+        measured.forEach { assertTrue(grid / 12 * it.span >= it.cardHeight + CourseCardLayout.OUTER_GAP * 2) }
+    }
+
+    @Test fun `空课表受时间栏最小高度保护且默认不额外增高`() {
+        assertEquals(600f, CourseCardLayout.gridHeight(600f, 100, 21f), 0.001f)
+        assertEquals(252f, CourseCardLayout.gridHeight(120f, 100, 21f), 0.001f)
     }
 
     @Test fun `整周按所需高度最大的节次统一对齐`() {

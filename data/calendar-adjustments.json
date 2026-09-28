@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "semesters": [
+    {
+      "xn": "2026-2027",
+      "xq": "1",
+      "suspendedDates": ["2026-10-06", "2026-10-07"],
+      "extraClasses": [
+        {"date": "2026-09-20", "sourceDate": "2026-10-06", "note": "补10月6日周二课程"},
+        {"date": "2026-10-10", "sourceDate": "2026-10-07", "note": "补10月7日周三课程"}
+      ]
+    }
+  ]
+}

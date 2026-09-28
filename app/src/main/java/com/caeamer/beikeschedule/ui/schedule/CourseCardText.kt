@@ -1,6 +1,7 @@
 package com.caeamer.beikeschedule.ui.schedule
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
@@ -29,42 +30,44 @@ internal fun CourseCardText(
     detailColor: Color = color,
 ) {
     val typography = remember(fontScale) { CourseCardTypography(fontScale) }
-    Column(Modifier.fillMaxSize().padding(CourseCardLayout.PADDING.dp)) {
-        Text(
-            course.name,
-            style = typography.name,
-            color = color,
-            maxLines = CourseCardLayout.nameLines(CourseCardLayout.span(course)),
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().testTag("course_name"),
-        )
-        Spacer(Modifier.weight(1f))
-        if (CourseCardLayout.detailLines(course) > 0) Spacer(Modifier.height(CourseCardLayout.DETAIL_GAP.dp))
-        val location = CourseCardLayout.location(course)
-        if (location.isNotBlank()) {
+    val measurer = rememberCourseCardMeasurer(fontScale, cacheSize = 32)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val layout = measurer.layout(course, constraints.maxWidth, constraints.maxHeight)
+        Column(Modifier.fillMaxSize().padding(CourseCardLayout.PADDING.dp)) {
             Text(
-                location, style = typography.location, color = locationColor,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().testTag("course_location"),
+                course.name,
+                style = typography.name,
+                color = color,
+                maxLines = layout.nameLines,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth().testTag("course_name"),
             )
-        }
-        if (course.teacher.isNotBlank()) {
-            Text(
-                course.teacher.trim(), style = typography.detail, color = detailColor,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().testTag("course_teacher"),
-            )
-        }
-        val oddEven = WeekUtils.oddEvenLabel(course.weekBitmap)
-        if (oddEven.isNotEmpty()) {
-            Text(
-                "[$oddEven]", style = typography.detail, color = detailColor,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().testTag("course_weeks"),
-            )
+            Spacer(Modifier.weight(1f))
+            if (CourseCardLayout.detailLines(course) > 0) Spacer(Modifier.height(CourseCardLayout.DETAIL_GAP.dp))
+            if (layout.location.isNotBlank()) {
+                Text(
+                    layout.location, style = typography.location, color = locationColor,
+                    overflow = TextOverflow.Clip,
+                    modifier = Modifier.fillMaxWidth().testTag("course_location"),
+                )
+            }
+            if (course.teacher.isNotBlank()) {
+                Text(
+                    course.teacher.trim(), style = typography.detail, color = detailColor,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().testTag("course_teacher"),
+                )
+            }
+            val oddEven = WeekUtils.oddEvenLabel(course.weekBitmap)
+            if (oddEven.isNotEmpty()) {
+                Text(
+                    "[$oddEven]", style = typography.detail, color = detailColor,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().testTag("course_weeks"),
+                )
+            }
         }
     }
 }

@@ -28,6 +28,14 @@ object WeekLayout {
             .filter { it.dayOfWeek == day && it.hasClassOnWeek(week) }
             .sortedBy { it.startSection }
 
+        return layoutResolved(actives, if (hideInactive) emptyList() else
+            courses.filter { it.dayOfWeek == day && !it.hasClassOnWeek(week) })
+    }
+
+    /** 输入已经按实际日期与来源教学日解析，不再用显示周过滤补课。 */
+    fun layoutResolved(activeCourses: List<CourseEntity>, inactiveCourses: List<CourseEntity>): DayLayout {
+        val actives = activeCourses.sortedBy { it.startSection }
+
         // 冲突簇：含传递重叠（A-B-C 链式同簇）。按 startSection 升序单趟扫描时，
         // "任意两门本周有课且重叠的课程必在同一簇"这一不变量成立 ——
         // 后处理的课程必然能命中先处理课程所在的簇。
@@ -37,11 +45,8 @@ object WeekLayout {
             if (cluster != null) cluster += course else clusters += mutableListOf(course)
         }
 
-        if (hideInactive) return DayLayout(clusters, emptyList())
-
         // 非本周课程：只在与所有本周课程、以及已放入的其他非本周课程都不重叠时才显示
-        val inactives = courses
-            .filter { it.dayOfWeek == day && !it.hasClassOnWeek(week) }
+        val inactives = inactiveCourses
             .fold(mutableListOf<CourseEntity>()) { shown, course ->
                 val blocked = actives.any { sectionsOverlap(it, course) } ||
                     shown.any { sectionsOverlap(it, course) }
