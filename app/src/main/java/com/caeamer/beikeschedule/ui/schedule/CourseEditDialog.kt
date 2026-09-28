@@ -44,6 +44,7 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -96,6 +97,8 @@ fun CourseEditDialog(
     manualNamesInUse: Set<String> = emptySet(),
     onDismiss: () -> Unit,
     onSave: (List<CourseEntity>) -> Unit,
+    saving: Boolean = false,
+    error: String? = null,
 ) {
     val initial = initialRows.firstOrNull()
     val scheduledRows = remember(initialRows) { initialRows.filter { !it.isUnscheduled } }
@@ -154,13 +157,14 @@ fun CourseEditDialog(
         }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!saving) onDismiss() },
         title = { Text(if (initial == null) "添加课程" else "编辑课程") },
         text = {
             Column(
                 Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
                     label = { Text("课程名 *") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -190,7 +194,7 @@ fun CourseEditDialog(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     COLOR_INDEX_RANGE.forEach { idx ->
-                        val (bg, fg) = CourseColors.of(idx)
+                        val (bg, fg) = CourseColors.of(idx, MaterialTheme.colorScheme.background.luminance() < 0.5f)
                         val selected = idx == selectedColor
                         Box(
                             modifier = Modifier
@@ -311,7 +315,7 @@ fun CourseEditDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = valid,
+                enabled = valid && !saving,
                 onClick = {
                     onSave(
                         CourseRowBuilder.build(
@@ -330,9 +334,9 @@ fun CourseEditDialog(
                         ),
                     )
                 },
-            ) { Text("保存") }
+            ) { Text(if (saving) "保存中…" else "保存") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text("取消") } },
     )
 }
 

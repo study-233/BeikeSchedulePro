@@ -2,6 +2,9 @@ package com.caeamer.beikeschedule.ui.schedule
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalOverscrollFactory
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -14,10 +17,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -25,20 +28,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Notes
-import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -47,24 +49,23 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.layout
@@ -92,16 +93,7 @@ import com.caeamer.beikeschedule.model.WeekResolver
 import com.caeamer.beikeschedule.model.WeekUtils
 import com.caeamer.beikeschedule.ui.common.rememberNow
 import com.caeamer.beikeschedule.ui.theme.CourseColors
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.launch
 import java.time.LocalDate
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import androidx.compose.ui.platform.LocalContext
 
 private val WEEKDAY_NAMES = listOf("一", "二", "三", "四", "五", "六", "日")
 
@@ -112,8 +104,6 @@ private val WEEKDAY_NAMES = listOf("一", "二", "三", "四", "五", "六", "�
  */
 private const val SCROLLABLE_SHEET_MIN_ITEMS = 5
 
-/** 网格底部可滚动的 FAB 避让空间（40dp 按钮 + 16dp 边距）。 */
-private val FAB_CLEARANCE = 56.dp
 
 /** 日期所属教学周（严格口径：开学前/假期跳周/学期后返回 null），与提醒排期同一套判定。 */
 private fun teachingWeekOf(semester: SettingsStore.SemesterConfig, date: LocalDate): Int? =
@@ -122,7 +112,12 @@ private fun teachingWeekOf(semester: SettingsStore.SemesterConfig, date: LocalDa
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduleScreen(
-    onImportClick: () -> Unit = {},
+    onImportClick: () -> Unit,
+    onSettings: () -> Unit,
+    onManage: () -> Unit = onSettings,
+    onCourseDetail: (CourseEntity, Int) -> Unit,
+    editCourseId: Long? = null,
+    onEditConsumed: () -> Unit = {},
     viewModel: ScheduleViewModel = viewModel(),
 ) {
     // withLifecycle：退到后台停止收集（WhileSubscribed 才能在后台真正停流）
@@ -130,36 +125,26 @@ fun ScheduleScreen(
     val appearanceViewModel: ScheduleAppearanceViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val savedAppearance by appearanceViewModel.appearance.collectAsStateWithLifecycle()
     val appearance = savedAppearance ?: ScheduleAppearance()
+    val cardMeasurer = rememberCourseCardMeasurer(appearance.fontScale)
     val chromeColor = if (appearance.backgroundFile.isNotEmpty()) {
         MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
     } else Color.Transparent
-    val reminderEnabled by viewModel.reminderEnabled.collectAsStateWithLifecycle()
-    val reminderMinutes by viewModel.reminderMinutes.collectAsStateWithLifecycle()
+    val operationError by viewModel.settingsError.collectAsStateWithLifecycle()
     val hideWeekend by viewModel.hideWeekend.collectAsStateWithLifecycle()
     val hideInactiveCourses by viewModel.hideInactiveCourses.collectAsStateWithLifecycle()
-    val reminderSchedule by viewModel.reminderSchedule.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
 
-    // 开启上课提醒前需要先拿到通知权限（Android 13+）
-    var pendingEnableReminder by remember { mutableStateOf(false) }
-    val notificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        if (granted && pendingEnableReminder) viewModel.setReminder(true, reminderMinutes)
-        pendingEnableReminder = false
-    }
-
+    val schedules by viewModel.schedules.collectAsStateWithLifecycle()
+    val managing by viewModel.managing.collectAsStateWithLifecycle()
+    var switchExpanded by remember { mutableStateOf(false) }
+    var editingScheduleId by remember { mutableStateOf<Long?>(null) }
     var weekMenuExpanded by remember { mutableStateOf(false) }
-    var detailCourse by remember { mutableStateOf<CourseEntity?>(null) }
     // 多时段课程编辑：存该课的全部行（同「名字+来源」），传给编辑框加载全部时段
     var editCourseGroup by remember { mutableStateOf<List<CourseEntity>?>(null) }
     var prefillSession by remember { mutableStateOf<SessionExpander.Session?>(null) }
     // 编辑框与其中的半填表单不做 rememberSaveable：SessionState 目前没有 Saver，
     // 只恢复"打开"标志会得到"对话框回来了、输入全丢"的假恢复，比关掉更糟（记录在案）。
     var showEditDialog by remember { mutableStateOf(false) }
-    // 下面两个对话框的全部内容都从 state 现读，旋转后恢复打开态是安全的
-    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var moreExpanded by remember { mutableStateOf(false) }
     // 长按空白格后待激活的"添加课程"格子（周几, 大节下标）
     var pendingSlot by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     // 无固定时间课程弹层
@@ -168,6 +153,14 @@ fun ScheduleScreen(
     // 只在 RESUMED 走时钟，且唤醒点对齐整分钟（见 rememberNow 注释）。
     val now = rememberNow()
 
+    LaunchedEffect(state.scheduleId) {
+        showEditDialog = false
+        editCourseGroup = null
+        prefillSession = null
+        showUnscheduledSheet = false
+        weekMenuExpanded = false
+        pendingSlot = null
+    }
     val totalWeeks = state.semester.totalWeeks
     val visibleDays = if (hideWeekend) (1..5).toList() else (1..7).toList()
 
@@ -179,6 +172,16 @@ fun ScheduleScreen(
      */
     fun groupOf(course: CourseEntity): List<CourseEntity> =
         state.courses.filter { it.name == course.name && it.source == course.source }
+
+    LaunchedEffect(editCourseId, state.loaded) {
+        if (editCourseId != null && state.loaded) {
+            state.courses.firstOrNull { it.id == editCourseId }?.let {
+                editCourseGroup = groupOf(it)
+                editingScheduleId = state.scheduleId; showEditDialog = true
+            }
+            onEditConsumed()
+        }
+    }
 
     // 其它**手动课程**已占用的名字（排除本次编辑的这些行）：编辑框据此禁止重名，
     // 否则两张同名卡会在隐藏/删除/编辑时互相连坐（groupOf 以 name+source 为键）。
@@ -198,86 +201,55 @@ fun ScheduleScreen(
             now = now,
         )?.courseId
     }
-    val pagerState = rememberPagerState(
-        // 用 state.selectedWeek（已 coerce 进 1..totalWeeks）而非 currentWeek 作初值：
-        // 旋转屏幕重建本页时，用 currentWeek 会把正在看第 5 周的用户甩回第 8 周，
-        // 随后下面的 LaunchedEffect 又把 selectedWeek 覆盖成 8，用户的选择被无声丢弃。
-        initialPage = (state.selectedWeek - 1).coerceIn(0, (totalWeeks - 1).coerceAtLeast(0)),
-        pageCount = { totalWeeks },
-    )
+    val schedulePager = key(state.scheduleId, state.scheduleVersion) { rememberSchedulePager(
+        loaded = state.loaded,
+        selectedWeek = state.selectedWeek,
+        totalWeeks = totalWeeks,
+        onWeekSelected = viewModel::selectWeek,
+    ) }
+    val pagerState = schedulePager.state
+    val pagerReady = schedulePager.ready
+    val displayedWeek = if (pagerReady) pagerState.currentPage + 1 else state.selectedWeek
 
-    // Pager 滑动 → 同步选中周
-    LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }
-            // 丢掉首帧：那是 rememberPagerState 的初始页（0），不是用户的滑动结果。
-            // 直接回写会把"首次定位当前周"覆盖成第 1 周——DataStore 异步读盘必然晚于这一帧，
-            // 于是每次启动课表都停在第 1 页，且写完后 selectedWeek 非空、定位永不发生。
-            .drop(1)
-            .collect { viewModel.selectWeek(it + 1) }
-    }
-    // 选中周变化（含学期设置改动后重新定位）→ Pager 跟随。
-    // 此前只以 currentWeek 为键：DataStore 写入让 selectedWeek 变成当前周时 Pager 不动，
-    // 于是出现"顶栏显示第 8 周、网格里是第 1 周的卡片与日期"的失步。
-    //
-    // 重新进入 App（新前台会话）时 ViewModel 会把 selectedWeek 打回当前周，走的就是这条路径。
-    // 这里刻意用 scrollToPage 瞬间落位而非 animateScrollToPage：重进 App 应该第一眼就是本周，
-    // 而不是让用户看着它从第 1 周一路滑到第 16 周。
-    LaunchedEffect(state.selectedWeek) {
-        val target = (state.selectedWeek - 1).coerceIn(0, (totalWeeks - 1).coerceAtLeast(0))
-        if (pagerState.currentPage != target) pagerState.scrollToPage(target)
-    }
-
-    // 暗色/浅色都用整屏渐变（深色版见 CourseColors.scheduleGradientDark），由 MainActivity 统一铺底，本页透明
     Scaffold(
         modifier = Modifier.background(SolidColor(Color.Transparent)),
         containerColor = Color.Transparent,
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
         topBar = {
             // 自定义矮顶栏（替代 TopAppBar 64dp 大留白），内容单行紧凑排列
             // 外层 Scaffold 已不消费状态栏 inset（contentWindowInsets=0），故这里自行 statusBarsPadding
-            // 透明，透出 MainActivity 的整屏渐变背景
+            // 透明部分透出宿主的自定义背景。
             Surface(color = chromeColor) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .height(58.dp)
+                        .heightIn(min = 64.dp)
                         .padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // 学期名（下挂今天日期与周次状态）可点击 → 学期设置
-                    // 标题只占按钮以外的剩余宽度，避免「回到本周」出现时挤压末尾的导入按钮。
-                    TextButton(
-                        onClick = { showSettings = true },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            horizontalAlignment = Alignment.Start,
-                        ) {
-                            Text(
-                                text = state.semester.name.ifBlank { "贝壳课表" },
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = todayStatusLine(state, now.toLocalDate()),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Box {
+                            TextButton(onClick = { switchExpanded = true }, enabled = state.loaded && !managing) {
+                                Text(state.scheduleName, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleLarge)
+                                Icon(Icons.Default.ArrowDropDown, "切换课表")
+                            }
+                            DropdownMenu(switchExpanded, { switchExpanded = false }) {
+                                schedules.forEach { item ->
+                                    DropdownMenuItem(text = { Text(item.name + if (item.id == state.scheduleId) " · 当前使用" else "") },
+                                        onClick = { switchExpanded = false; viewModel.switchSchedule(item.id) })
+                                }
+                                DropdownMenuItem(text = { Text("课表管理") }, onClick = { switchExpanded = false; onManage() })
+                            }
                         }
-                        Icon(
-                            Icons.Default.ExpandMore,
-                            contentDescription = "学期设置",
-                            modifier = Modifier.width(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Text(state.semester.name.ifBlank { todayStatusLine(state, now.toLocalDate()) },
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(Modifier.width(2.dp))
-                    TextButton(onClick = { weekMenuExpanded = true }) {
-                        Text("第${state.selectedWeek}周")
+                    TextButton(onClick = { weekMenuExpanded = true }, enabled = state.loaded) {
+                        Text("第${displayedWeek}周")
                         Icon(
                             Icons.Default.ArrowDropDown,
                             contentDescription = "选择周次",
@@ -285,70 +257,54 @@ fun ScheduleScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    DropdownMenu(
-                        expanded = weekMenuExpanded,
-                        onDismissRequest = { weekMenuExpanded = false },
-                    ) {
-                        (1..totalWeeks).forEach { w ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        "第${w}周" + when {
-                                            w != state.currentWeek -> ""
-                                            state.inHoliday -> "（假期后）"
-                                            else -> "（本周）"
-                                        },
-                                        fontWeight = if (w == state.currentWeek) FontWeight.Bold else FontWeight.Normal,
-                                    )
-                                },
-                                onClick = {
-                                    weekMenuExpanded = false
-                                    scope.launch { pagerState.animateScrollToPage(w - 1) }
-                                },
-                            )
-                        }
-                    }
-                    if (state.currentWeek != null && state.selectedWeek != state.currentWeek) {
+                    if (state.currentWeek != null && displayedWeek != state.currentWeek) {
                         IconButton(onClick = {
-                            scope.launch { pagerState.animateScrollToPage(state.currentWeek!! - 1) }
+                            viewModel.selectWeek(state.currentWeek!!)
                         }) {
-                            Icon(Icons.Default.DateRange, contentDescription = "回到本周")
+                            Icon(Icons.Default.DateRange, contentDescription = when {
+                                state.beforeStart -> "查看开学周"
+                                state.inHoliday -> "查看假期后教学周"
+                                else -> "回到本周"
+                            })
                         }
                     }
-                    if (state.unscheduledCourses.isNotEmpty()) {
-                        IconButton(onClick = { showUnscheduledSheet = true }) {
-                            Icon(Icons.Default.Notes, contentDescription = "无固定时间课程")
+                    Box {
+                        IconButton(onClick = { moreExpanded = true }) { Icon(Icons.Default.MoreVert, "更多") }
+                        DropdownMenu(moreExpanded, { moreExpanded = false }) {
+                            DropdownMenuItem(text = { Text("课表管理") }, onClick = { moreExpanded = false; onManage() })
+                            DropdownMenuItem(text = { Text("导入课表") }, onClick = { moreExpanded = false; onImportClick() })
+                            DropdownMenuItem(text = { Text("添加课程") }, onClick = {
+                                moreExpanded = false; prefillSession = null; editCourseGroup = null; editingScheduleId = state.scheduleId; showEditDialog = true
+                            })
+                            DropdownMenuItem(text = { Text("无固定时间课程") }, onClick = { moreExpanded = false; showUnscheduledSheet = true })
+                            DropdownMenuItem(text = { Text("课表设置") }, onClick = { moreExpanded = false; onSettings() })
                         }
-                    }
-                    IconButton(onClick = onImportClick) {
-                        Icon(Icons.Default.CloudDownload, contentDescription = "从教务系统导入")
                     }
                 }
             }
         },
-        floatingActionButton = {
-            // 小号 FAB：56dp 默认尺寸在课表页喧宾夺主，40dp + 默认阴影足够
-            SmallFloatingActionButton(onClick = {
-                prefillSession = null
-                showEditDialog = true
-            }) {
-                Icon(Icons.Default.Add, contentDescription = "添加课程", modifier = Modifier.size(20.dp))
-            }
-        },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (state.loaded && state.courses.isEmpty()) {
+            operationError?.let { error ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(error, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = viewModel::clearSettingsError) { Text("知道了") }
+                }
+            }
+            if (!state.loaded || !pagerReady) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.padding(24.dp))
+            } else if (state.courses.isEmpty()) {
                 EmptyState(
                     onLoadSample = { viewModel.loadSampleData() },
                     onImportClick = onImportClick,
                     onAdd = {
-                        showEditDialog = true
+                        editingScheduleId = state.scheduleId; showEditDialog = true
                     },
                 )
             } else {
                 Surface(color = chromeColor) {
                     DateRow(
-                        week = state.selectedWeek,
+                        week = displayedWeek,
                         semester = state.semester,
                         today = now.toLocalDate(),
                         days = visibleDays,
@@ -378,52 +334,46 @@ fun ScheduleScreen(
                         nextClassId = nextClassId.takeIf { page + 1 == teachingWeekOf(state.semester, now.toLocalDate()) },
                         hideInactiveCourses = hideInactiveCourses,
                         appearance = appearance,
+                        cardMeasurer = cardMeasurer,
                         onSlotLongPress = { day, big -> pendingSlot = day to big },
                         onSlotClick = { day, big ->
                             if (pendingSlot == day to big) {
                                 prefillSession = SessionExpander.Session(day, setOf(big))
-                                showEditDialog = true
+                                editingScheduleId = state.scheduleId; showEditDialog = true
                             }
                             pendingSlot = null
                         },
-                        onCourseClick = { detailCourse = it },
+                        onCourseClick = { onCourseDetail(it, page + 1) },
                     )
                 }
             }
         }
     }
 
-    detailCourse?.let { course ->
-        CourseDetailSheet(
-            course = course,
-            sectionTimes = state.sectionTimes,
-            isSample = course.source == CourseEntity.SOURCE_SAMPLE,
-            isImported = course.source == CourseEntity.SOURCE_IMPORT,
-            onDismiss = { detailCourse = null },
-            onEdit = {
-                detailCourse = null
-                // 多时段课程：加载同名同源的全部行（编辑框回显全部时段）
-                editCourseGroup = groupOf(course).ifEmpty { listOf(course) }
-                showEditDialog = true
+    if (weekMenuExpanded && state.loaded) {
+        WeekPickerSheet(
+            totalWeeks = totalWeeks,
+            selectedWeek = displayedWeek,
+            currentWeek = state.currentWeek,
+            currentWeekLabel = when {
+                state.beforeStart -> "待开学"
+                state.inHoliday -> "假期后"
+                else -> "本周"
             },
-            // 隐藏/删除必须作用于**整组合并行**，不能只用卡片 id。
-            // 卡片来自 CourseMerger.mergeSameSlot，它的 id 是基准行的 id；教务单双周/
-            // 调课拆行与手动多时段课都有 N 行，只改一行会让卡片原样留在网格上——
-            // 用户看到的是"点了隐藏没反应"。
-            onDelete = {
-                viewModel.saveCourses(emptyList(), replaceIds = groupOf(course).map { it.id })
-                detailCourse = null
+            onSelectWeek = { week ->
+                weekMenuExpanded = false
+                // 离散选周直接定位；也适用于没有挂载 Pager 的空课表。
+                viewModel.selectWeek(week)
             },
-            onHide = {
-                viewModel.setCoursesHidden(groupOf(course).map { it.id }, true)
-                detailCourse = null
-            },
+            onDismissRequest = { weekMenuExpanded = false },
         )
     }
 
-    if (showEditDialog) {
+    if (showEditDialog && editingScheduleId == state.scheduleId) {
         CourseEditDialog(
             initialRows = editCourseGroup.orEmpty(),
+            saving = managing,
+            error = operationError,
             totalWeeks = totalWeeks,
             prefill = prefillSession,
             manualNamesInUse = manualNamesInUse,
@@ -433,10 +383,11 @@ fun ScheduleScreen(
                 editCourseGroup = null
             },
             onSave = { rows ->
-                viewModel.saveCourses(rows, replaceIds = editCourseGroup?.map { it.id })
-                showEditDialog = false
-                prefillSession = null
-                editCourseGroup = null
+                viewModel.saveCourses(editingScheduleId ?: state.scheduleId, rows, replaceIds = editCourseGroup?.map { it.id }) {
+                    showEditDialog = false
+                    prefillSession = null
+                    editCourseGroup = null
+                }
             },
         )
     }
@@ -450,45 +401,12 @@ fun ScheduleScreen(
                 editCourseGroup = state.courses.filter {
                     it.name == course.name && it.source == course.source
                 }.ifEmpty { listOf(course) }
-                showEditDialog = true
+                editingScheduleId = state.scheduleId; showEditDialog = true
             },
         )
     }
 
-    if (showSettings) {
-        SemesterSettingsDialog(
-            current = state.semester,
-            hasSample = state.hasSample,
-            hiddenCourses = state.hiddenCourses,
-            reminderEnabled = reminderEnabled,
-            reminderMinutes = reminderMinutes,
-            hideWeekend = hideWeekend,
-            reminderSchedule = reminderSchedule,
-            onDismiss = { showSettings = false },
-            onSave = { viewModel.saveSemester(it) },
-            onReminderChange = { enabled, minutes -> viewModel.setReminder(enabled, minutes) },
-            onHideWeekendChange = { viewModel.setHideWeekend(it) },
-            onClearSample = { viewModel.clearSampleData() },
-            // 恢复也必须按整组：隐藏是按合并组做的（一张卡 N 行），只恢复一行会留下
-            // 一张"残废"卡片（例如只剩第 7 周有课），且隐藏列表里还有同名项要反复点。
-            onRestoreCourse = { id ->
-                state.courses.firstOrNull { it.id == id }
-                    ?.let { row -> viewModel.setCoursesHidden(groupOf(row).map { it.id }, false) }
-                    ?: viewModel.setCourseHidden(id, false)
-            },
-            onRequestNotificationPermission = { onGranted ->
-                if (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
-                        context, Manifest.permission.POST_NOTIFICATIONS,
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    onGranted()
-                } else {
-                    pendingEnableReminder = true
-                    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-            },
-        )
-    }
+
 }
 
 @Composable
@@ -568,7 +486,7 @@ private fun DateRow(week: Int, semester: SettingsStore.SemesterConfig, today: Lo
     }
 }
 
-private val SECTION_COL_WIDTH = 36.dp
+private val SECTION_COL_WIDTH = CourseCardLayout.TIME_COLUMN_WIDTH.dp
 
 /** 一周课表网格：左节次列 + N 天列，课程块按节次绝对定位；同周重叠课程并排窄列显示；空白格长按可添加课程。 */
 @OptIn(ExperimentalFoundationApi::class)
@@ -584,6 +502,7 @@ private fun WeekGrid(
     /** 开启后不再显示"本周暂时不上"的淡化课（设置页开关）。 */
     hideInactiveCourses: Boolean,
     appearance: ScheduleAppearance,
+    cardMeasurer: CourseCardMeasurer,
     onSlotLongPress: (day: Int, big: Int) -> Unit,
     onSlotClick: (day: Int, big: Int) -> Unit,
     onCourseClick: (CourseEntity) -> Unit,
@@ -594,20 +513,21 @@ private fun WeekGrid(
     val dayLayouts = remember(mergedCourses, days, week, hideInactiveCourses) {
         days.associateWith { WeekLayout.layoutDay(mergedCourses, it, week, hideInactiveCourses) }
     }
-    val visibleCourses = remember(dayLayouts) {
-        dayLayouts.values.flatMap { it.clusters.flatten() + it.inactives }
-    }
     val density = LocalDensity.current
-    val minimumUnit = with(density) {
-        CourseCardLayout.minimumUnitHeight(
-            visibleCourses,
-            (13 * appearance.fontScale).sp.toDp().value,
-            (11 * appearance.fontScale).sp.toDp().value,
-        ).dp
-    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
+        // weight 列分配存在 1px 舍入，取较窄列宽测量，确保任何列都不会少算行数。
+        val dayWidthPx = (constraints.maxWidth - with(density) { SECTION_COL_WIDTH.roundToPx() }) / days.size
+        val outerGapPx = with(density) { CourseCardLayout.OUTER_GAP.dp.roundToPx() } * 2
+        val minimumUnit = remember(dayLayouts, dayWidthPx, outerGapPx, cardMeasurer) {
+            val measurements = dayLayouts.values.flatMap { day ->
+                day.clusters.flatMap { cluster ->
+                    cluster.map { cardMeasurer.measure(it, (dayWidthPx / cluster.size - outerGapPx).coerceAtLeast(1)) }
+                } + day.inactives.map { cardMeasurer.measure(it, (dayWidthPx - outerGapPx).coerceAtLeast(1)) }
+            }
+            CourseCardLayout.minimumUnitHeight(measurements).dp
+        }
         val gridHeight = maxOf(
-            (maxHeight - FAB_CLEARANCE).coerceAtLeast(0.dp),
+            maxHeight,
             minimumUnit * SectionMap.TOTAL_SMALL_SECTIONS,
         )
         // 显式有限高度供课程绝对定位使用；日期栏在滚动容器之外，背景由宿主固定铺底。
@@ -627,7 +547,7 @@ private fun WeekGrid(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
                         ) {
-                            Text(SectionMap.BIG_NAMES[index], fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Text(SectionMap.BIG_NAMES[index], fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             timeMap[range.first]?.let {
                                 Text(it.startTime, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
@@ -693,6 +613,7 @@ private fun WeekGrid(
                                     Box(Modifier.weight(1f).fillMaxHeight()) {
                                         CourseCard(
                                             course = course,
+                                            week = week,
                                             active = true,
                                             fontScale = appearance.fontScale,
                                             isNext = course.id == nextClassId,
@@ -705,6 +626,7 @@ private fun WeekGrid(
                         dayLayout.inactives.forEach { course ->
                             CourseCard(
                                 course = course,
+                                week = week,
                                 active = false,
                                 fontScale = appearance.fontScale,
                                 isNext = false,
@@ -714,8 +636,7 @@ private fun WeekGrid(
                     }
                 }
             }
-            // 滚到最底部时，末节课程可以完整避开悬浮添加按钮。
-            Spacer(Modifier.height(FAB_CLEARANCE))
+
         }
     }
 }
@@ -724,13 +645,20 @@ private fun WeekGrid(
 private fun androidx.compose.foundation.layout.BoxScope.CourseCard(
     course: CourseEntity,
     active: Boolean,
+    week: Int,
     fontScale: Float,
-    /** 是否为"下一节课"（今天尚未开始的最早一节）：右上角叠加图钉徽标。 */
+    /** 是否为下一节课：细描边和右上角蓝点，不挤占标题宽度。 */
     isNext: Boolean,
     onClick: () -> Unit,
 ) {
-    // 本周/非本周都用课程本色：非本周整体淡化（灰底会被误认为本周有课，用户明确要求回退）
-    val (bg, fg) = CourseColors.of(course.colorIndex)
+    val sources = LocalCourseSources.current
+    val sourceKey = courseSourceKey(course, week)
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 0.98f else 1f,
+        androidx.compose.animation.core.tween(com.caeamer.beikeschedule.ui.common.AppMotion.STATE), label = "coursePress")
+    androidx.compose.runtime.DisposableEffect(sourceKey) { onDispose { sources.bounds.remove(sourceKey) } }
+    val colors = CourseColors.card(course.colorIndex, MaterialTheme.colorScheme.background.luminance() < 0.5f, active)
     // 13 节特殊加课钳制到第 12 节区间显示（网格按 12 小节排版）
     val clampedStart = course.startSection.coerceIn(1, SectionMap.TOTAL_SMALL_SECTIONS)
     val span = CourseCardLayout.span(course)
@@ -739,34 +667,33 @@ private fun androidx.compose.foundation.layout.BoxScope.CourseCard(
             .fillMaxWidth()
             .align(androidx.compose.ui.Alignment.TopCenter)
             .coursePosition(clampedStart, span)
-            .padding(1.dp),
+            .padding(CourseCardLayout.OUTER_GAP.dp)
+            .onGloballyPositioned { sources.bounds[sourceKey] = it.boundsInRoot() }
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .alpha(if (sources.selected == sourceKey) 0f else 1f),
     ) {
         Surface(
-            color = bg,
+            color = colors.background,
             shape = RoundedCornerShape(6.dp),
+            border = if (isNext) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight()
-                .alpha(if (active) 1f else 0.3f)
-                .clickable(onClick = onClick),
+                .semantics {
+                    stateDescription = when {
+                        isNext -> "下一节课"
+                        !active -> "非本周课程"
+                        else -> "本周课程"
+                    }
+                }
+                .clickable(interactionSource = interaction, indication = null, onClick = onClick),
         ) {
-            CourseCardText(course, fg, fontScale, isNext)
+            CourseCardText(course, colors.title, fontScale, colors.location, colors.detail)
         }
-        // 下一节课图钉徽标：右上角圆形叠标，不占卡片内文字行高
+        // 蓝点放在上边缘，不再为整段标题预留 15dp；“下一节课”由卡片语义播报。
         if (isNext) {
-            Surface(
-                color = MaterialTheme.colorScheme.primary,
-                shape = CircleShape,
-                shadowElevation = 2.dp,
-                modifier = Modifier.align(androidx.compose.ui.Alignment.TopEnd).padding(2.dp),
-            ) {
-                Icon(
-                    Icons.Default.PushPin,
-                    contentDescription = "下一节课",
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.padding(2.dp).size(11.dp),
-                )
-            }
+            Box(Modifier.align(Alignment.TopEnd).offset(y = (-3).dp).size(6.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape))
         }
     }
 }
@@ -833,7 +760,7 @@ private fun UnscheduledSheet(
                     }
                 }
                 items(distinctCourses, key = { it.id }) { course ->
-                    val (bg, fg) = CourseColors.of(course.colorIndex)
+                    val (bg, fg) = CourseColors.of(course.colorIndex, MaterialTheme.colorScheme.background.luminance() < 0.5f)
                     Surface(
                         color = bg,
                         shape = RoundedCornerShape(8.dp),

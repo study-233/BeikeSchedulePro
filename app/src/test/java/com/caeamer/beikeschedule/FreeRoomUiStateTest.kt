@@ -86,6 +86,18 @@ class FreeRoomUiStateTest {
         assertEquals(2, manual.effectiveExpandedIndex(LocalTime.of(10, 0)))
     }
 
+    @Test
+    fun `时段间隙优先下一时段且过去时段在后`() {
+        val now = LocalTime.of(9, 45)
+        assertEquals(1, state.effectiveExpandedIndex(now))
+        assertEquals(listOf(1, 2, 0), state.orderedSlotIndices(now))
+    }
+
+    @Test
+    fun `全部结束后当天记录按时间排列`() {
+        assertEquals(listOf(0, 1, 2), state.orderedSlotIndices(LocalTime.of(23, 0)))
+    }
+
     // ——— 进行中 / 已结束 ———
 
     @Test

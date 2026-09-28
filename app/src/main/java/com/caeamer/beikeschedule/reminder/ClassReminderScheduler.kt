@@ -9,6 +9,7 @@ import android.content.Intent
 import com.caeamer.beikeschedule.data.local.CourseEntity
 import com.caeamer.beikeschedule.data.pref.SettingsStore
 import com.caeamer.beikeschedule.data.repo.ScheduleRepository
+import com.caeamer.beikeschedule.model.ClassReminderIdentity
 import com.caeamer.beikeschedule.model.ReminderCourses
 import com.caeamer.beikeschedule.model.WeekResolver
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +34,9 @@ object ClassReminderScheduler {
     const val CHANNEL_ID = "class_reminder"
     const val ACTION_REMIND = "io.github.study233.beikeschedulepro.action.REMIND"
     const val ACTION_DAILY_PULSE = "io.github.study233.beikeschedulepro.action.DAILY_PULSE"
+    const val EXTRA_SCHEDULE_ID = "scheduleId"
+    const val EXTRA_VERSION = "scheduleVersion"
+    const val EXTRA_COURSE_ID = "courseId"
     const val EXTRA_NAME = "name"
     const val EXTRA_LOCATION = "location"
     const val EXTRA_TIME_TEXT = "timeText"
@@ -79,48 +83,39 @@ object ClassReminderScheduler {
         val location: String,
         val startTime: String,
         val minutes: Int,
+        val courseId: Long = 0,
     )
 
     /** 课程/学期/提醒设置变化时调用：按最新数据全量重排。 */
     suspend fun reschedule(context: Context) = rescheduleMutex.withLock {
-        // 切到 IO：下面全是 Room/DataStore 读 + 每条闹钟一次 binder 调用
-        // （PendingIntent 构造 + setExact），窗口内几十条时在主线程会明显掉帧
         withContext(Dispatchers.IO) {
             val repo = ScheduleRepository(context)
             val settings = repo.settings
-
-            // —— 先算：所有读取与计算都在取消任何闹钟之前完成 ——
-            val now = LocalDateTime.now()
-            val zone = ZoneId.systemDefault()
-            val enabled = settings.reminderEnabled.first()
-            val planned = if (enabled) {
+            // 若排期期间用户又切换，持锁重新读取，最终一轮必须对应最新课表。
+            do {
+                val snapshot = repo.getScheduleSnapshot()
+                val identity = ClassReminderIdentity.key(snapshot.scheduleId, snapshot.reminderVersion)
+                val enabled = settings.reminderEnabled.first()
                 val minutes = settings.reminderMinutes.first()
-                val semester = settings.semester.first()
-                val courses = reminderCourses(repo.courses.first())
-                val startTimes = repo.sectionTimes.first().associate { it.section to it.startTime }
-                planClassReminders(courses, startTimes, semester, minutes, now, zone)
-            } else {
-                emptyList()
-            }
-            val recorded = settings.reminderScheduledAlarms.first()
-
-            // —— 后换：不可中断地取消 + 设置 + 写回 ——
-            ReminderAlarmScheduler.apply(
-                context = context,
-                action = ACTION_REMIND,
-                recorded = recorded,
-                planned = planned.map { p ->
-                    ReminderAlarmScheduler.PlannedAlarm(
-                        requestCode = p.requestCode,
-                        triggerAtMillis = p.triggerAtMillis,
-                        pendingIntent = remindPendingIntent(context, p),
-                    )
-                },
-                // 用户主动关掉提醒时连"已到点还没投递"的也一并取消 —— 那种情况下再弹一次才是 bug
-                cancelDueAlarms = !enabled,
-                persist = { settings.saveReminderScheduledAlarms(it) },
-            )
-
+                val planned = if (enabled) {
+                    planClassReminders(reminderCourses(snapshot.courses),
+                        snapshot.sectionTimes.associate { it.section to it.startTime }, snapshot.semester,
+                        minutes, LocalDateTime.now(), ZoneId.systemDefault()).map {
+                        it.copy(requestCode = Math.floorMod("${it.requestCode}@$identity".hashCode(), REQUEST_CODE_RANGE))
+                    }
+                } else emptyList()
+                val recorded = settings.reminderScheduledAlarms.first()
+                val changed = settings.reminderScheduleIdentity.first() != identity
+                ReminderAlarmScheduler.apply(
+                    context = context, action = ACTION_REMIND, recorded = recorded,
+                    planned = planned.map { p -> ReminderAlarmScheduler.PlannedAlarm(
+                        p.requestCode, p.triggerAtMillis,
+                        remindPendingIntent(context, p, snapshot.scheduleId, snapshot.reminderVersion)) },
+                    cancelDueAlarms = !enabled || changed,
+                    persist = { settings.saveReminderScheduledAlarms(it, identity) },
+                )
+                val latest = repo.getScheduleSnapshot()
+            } while (latest.scheduleId != snapshot.scheduleId || latest.reminderVersion != snapshot.reminderVersion)
             scheduleDailyPulse(context)
         }
     }
@@ -160,6 +155,7 @@ object ClassReminderScheduler {
                     location = course.location,
                     startTime = startTime,
                     minutes = minutes,
+                    courseId = course.id,
                 )
             }
         }
@@ -188,9 +184,14 @@ object ClassReminderScheduler {
     private fun remindPendingIntent(
         context: Context,
         plan: PlannedClassReminder,
+        scheduleId: Long,
+        version: Long,
     ): PendingIntent {
         val intent = Intent(context, ReminderReceiver::class.java)
             .setAction(ACTION_REMIND)
+            .putExtra(EXTRA_SCHEDULE_ID, scheduleId)
+            .putExtra(EXTRA_VERSION, version)
+            .putExtra(EXTRA_COURSE_ID, plan.courseId)
             .putExtra(EXTRA_NAME, plan.courseName)
             .putExtra(EXTRA_LOCATION, plan.location)
             .putExtra(EXTRA_TIME_TEXT, "${plan.startTime} 上课")

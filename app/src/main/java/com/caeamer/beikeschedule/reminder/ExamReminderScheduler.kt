@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import com.caeamer.beikeschedule.data.local.ExamEntity
+import com.caeamer.beikeschedule.model.timeLabel
 import com.caeamer.beikeschedule.data.repo.ScheduleRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -64,16 +65,10 @@ object ExamReminderScheduler {
     /**
      * 考试数据变化/开机/每日脉冲时调用：按最新数据全量重排。
      *
-     * @param cancelDueAlarms 为 true 时连"已到点但系统还没投递"的闹钟也一并取消。
-     *   只用于**用户显式清空考试数据**的场景（清除成绩缓存）：那时用户明确要求别再提醒，
-     *   "再弹最后一次带过期地点与座位号的考试提醒"才是 bug。
-     *   其余情况（日常重排、脉冲、开机）必须保持 false，否则会丢掉 Doze 下尚未投递的提醒。
-     *
-     *   此前本方法没有这个参数，而 [ReminderAlarmScheduler.apply] 的默认值是 false，
-     *   于是"清空考试数据"后那条已到点的考试闹钟仍会弹出——与上课提醒（那边传了
-     *   `!enabled`）的行为不一致。
+     * @param changedExamIds 手动编辑/删除的考试，连已到点的旧提醒也定向取消。
+     * 已不在数据库中的考试（教务替换/清缓存）自动取消；其余考试保留 Doze 待投递提醒。
      */
-    suspend fun reschedule(context: Context, cancelDueAlarms: Boolean = false) {
+    suspend fun reschedule(context: Context, changedExamIds: Set<Long> = emptySet()) {
         rescheduleMutex.withLock {
             // 切到 IO：下面全是 Room/DataStore 读 + 每条闹钟一次 binder 调用
             // （PendingIntent 构造 + setExact），窗口内几十条时在主线程会明显掉帧
@@ -99,7 +94,7 @@ object ExamReminderScheduler {
                             pendingIntent = pendingIntent(context, p),
                         )
                     },
-                    cancelDueAlarms = cancelDueAlarms,
+                    forceCancelCodes = obsoleteReminderCodes(exams, recorded.map { it.requestCode }.toSet(), changedExamIds),
                     persist = { settings.saveExamScheduledAlarms(it) },
                 )
             }
@@ -147,15 +142,23 @@ object ExamReminderScheduler {
         return result
     }
 
+    /** 仅撤销已删除或明确修改的考试，不能把“本轮不再计划”的所有到点提醒一并取消。 */
+    internal fun obsoleteReminderCodes(
+        exams: List<ExamEntity>, recordedCodes: Set<Int>, changedExamIds: Set<Long>,
+    ): Set<Int> {
+        val liveCodes = exams.flatMap { reminderCodes(it.id) }.toSet()
+        return (recordedCodes - liveCodes) + changedExamIds.flatMap { reminderCodes(it) }
+    }
+
+    private fun reminderCodes(id: Long): List<Int> =
+        listOf(REQUEST_CODE_BASE + (id * 2).toInt(), REQUEST_CODE_BASE + (id * 2).toInt() + 1)
+
     // 8_000_000 段：examId*2(+1)，与上课提醒的 requestCode 空间隔离
     private fun requestCodeOf(exam: ExamEntity, dayBefore: Boolean): Int =
         REQUEST_CODE_BASE + (exam.id * 2).toInt() + if (dayBefore) 0 else 1
 
-    private fun examTimeText(exam: ExamEntity): String = when {
-        exam.kssj.isNotBlank() && exam.jssj.isNotBlank() -> "${exam.ksrq} ${exam.kssj}-${exam.jssj}"
-        exam.ksrq.isNotBlank() -> exam.ksrq
-        else -> exam.kssjms
-    }
+    private fun examTimeText(exam: ExamEntity): String =
+        listOf(exam.ksrq, exam.timeLabel()).filter { it.isNotBlank() }.joinToString(" ")
 
     private fun pendingIntent(context: Context, plan: PlannedExamReminder): PendingIntent {
         val exam = plan.exam

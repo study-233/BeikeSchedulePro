@@ -51,7 +51,7 @@ internal object ReminderAlarmScheduler {
      *
      * @param plannedCodes 本轮计划要排的 requestCode 集合
      * @param nowMillis 当前时刻
-     * @param cancelDueAlarms 为 true 时连"已到点"的也一起取消 —— 只用于用户主动关闭提醒的场景：
+     * @param cancelDueAlarms 为 true 时连"已到点"的也一起取消 —— 用于关闭提醒或当前课表失效：
      *   那时用户明确要求别提醒，"再弹最后一次"才是 bug；其余情况已到点的必须留给系统投递。
      * @param forceCancelCodes 定向取消集合：即便已到点也要取消。用于"用户明确表达了不要这条提醒"
      *   的语义（如今天已打卡的日程），比 cancelDueAlarms 窄，不会误伤同批其他待投递提醒。
@@ -64,7 +64,7 @@ internal object ReminderAlarmScheduler {
         forceCancelCodes: Set<Int> = emptySet(),
     ): List<ScheduledAlarm> = recorded.filter { alarm ->
         when {
-            // 用户主动关闭提醒 → 全部取消（含已到点的）
+            // 用户关闭提醒或切换/清空课表 → 全部取消（含已到点的）
             cancelDueAlarms -> true
             // 定向取消（打卡/明确不要这条）→ 即便已到点也取消
             alarm.requestCode in forceCancelCodes -> true
@@ -110,7 +110,8 @@ internal object ReminderAlarmScheduler {
             // 那条正在 Doze 队列里的闹钟。超出宽限期（投递窗口已过）才真正移除。
             val plannedRecords = planned.map { ScheduledAlarm(it.requestCode, it.triggerAtMillis) }
             val dueKept = recorded.filter { old ->
-                old.triggerAtMillis != null &&
+                !cancelDueAlarms && old.requestCode !in forceCancelCodes &&
+                    old.triggerAtMillis != null &&
                     old.triggerAtMillis <= now &&
                     old.triggerAtMillis > now - DUE_RECORD_GRACE_MS
             }

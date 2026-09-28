@@ -13,20 +13,22 @@ import com.caeamer.beikeschedule.model.WeekResolver
 import com.caeamer.beikeschedule.reminder.ClassReminderScheduler
 import com.caeamer.beikeschedule.widget.WidgetUpdateCoordinator
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.time.DayOfWeek
-import java.time.LocalDate
-import java.time.temporal.TemporalAdjusters
 
 data class ScheduleUiState(
+    val scheduleId: Long = 0,
+    val scheduleName: String = "课表",
+    val scheduleVersion: Long = 0,
     val courses: List<CourseEntity> = emptyList(),
     val sectionTimes: List<SectionTimeEntity> = emptyList(),
     val semester: SettingsStore.SemesterConfig = SettingsStore.SemesterConfig(),
@@ -69,19 +71,43 @@ data class ReminderScheduleInfo(
 class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = ScheduleRepository(app)
+    private val settingsErrorState = MutableStateFlow<String?>(null)
+    val settingsError: StateFlow<String?> = settingsErrorState
+    private val savingSemesterState = MutableStateFlow(false)
+    val savingSemester: StateFlow<Boolean> = savingSemesterState
+    fun clearSettingsError() { settingsErrorState.value = null }
 
-    /**
-     * 用户选中的教学周；**null = 还没选过 / 需要重新定位到当前周**。
-     *
-     * 每个前台会话（首次冷启动，或退出 App 后再进入）都会被打回 null，
-     * 于是重新解析为当前周；App 内切 Tab 回来、旋转屏幕都不会打回，用户的选择得以保留。
-     *
-     * 不能用"selectedWeek == 1"当"还没选过"的哨兵：用户主动选第 1 周与尚未初始化
-     * 无法区分，而 `repo.settings.semester` 是 DataStore 流，任何一次设置写入
-     * （切主题、改提醒开关、切换隐藏周末）都会让它重新发射，于是下面的初始化逻辑
-     * 会把用户选的第 1 周改写成当前周——表现为"点一下设置开关，课表自己跳回本周"。
-     */
-    private val selectedWeek = MutableStateFlow<Int?>(null)
+    private fun changeSetting(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+                settingsErrorState.value = null
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                settingsErrorState.value = e.message ?: "未能保存设置，请重试"
+            }
+        }
+    }
+
+    fun saveSemesterDraft(scheduleId: Long, draft: com.caeamer.beikeschedule.model.SemesterDraft, onSaved: () -> Unit) {
+        if (savingSemesterState.value) return
+        savingSemesterState.value = true
+        viewModelScope.launch {
+            try {
+                repo.saveSemesterDraft(scheduleId, draft)
+                settingsErrorState.value = null
+                refreshWidget()
+                onSaved()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                settingsErrorState.value = "学期保存失败，修改已保留，请重试"
+            } finally { savingSemesterState.value = false }
+        }
+    }
+
+
+    /** 选择周次绑定课表身份；null 表示按当前日期定位，不把第 1 周当作未选择。 */
+    private val selectedWeek = MutableStateFlow<Triple<Long, Long, Int>?>(null)
 
     /**
      * 前台会话序号（镜像 [AppSession.epoch]）。
@@ -94,29 +120,60 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
      */
     private val sessionEpoch = MutableStateFlow(AppSession.epoch.value)
 
-    val uiState: StateFlow<ScheduleUiState> = combine(
-        repo.courses,
-        repo.sectionTimes,
-        repo.settings.semester,
-        selectedWeek,
-        sessionEpoch,
-    ) { courses, sections, semester, week, _ ->
+    private val snapshot = repo.currentSchedule.retryWhen { cause, _ ->
+        if (cause is CancellationException) throw cause
+        settingsErrorState.value = "无法读取课表，正在重试"
+        delay(1500)
+        true
+    }.onEach {
+        if (settingsErrorState.value == "无法读取课表，正在重试") settingsErrorState.value = null
+    }
+    val schedules = repo.schedules.retryWhen { cause, _ ->
+        if (cause is CancellationException) throw cause
+        settingsErrorState.value = "无法读取课表列表，正在重试"
+        delay(1500)
+        true
+    }.onEach {
+        if (settingsErrorState.value == "无法读取课表列表，正在重试") settingsErrorState.value = null
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val uiState: StateFlow<ScheduleUiState> = combine(snapshot, selectedWeek, sessionEpoch) { data, selection, _ ->
+        val semester = data.semester
         val location = WeekResolver.locateWeek(semester)
-        // 未选过时（首次启动 / 重新进入 App）按 WeekResolver.defaultWeek 落位，否则用用户的选择
+        val week = selection?.takeIf { it.first == data.scheduleId && it.second == data.reminderVersion }?.third
         val resolved = week ?: WeekResolver.defaultWeek(location, semester.totalWeeks)
         ScheduleUiState(
-            courses = courses,
-            sectionTimes = sections,
-            semester = semester,
-            selectedWeek = resolved.coerceIn(1, semester.totalWeeks),
-            currentWeek = location.week,
-            inHoliday = location.isHoliday,
-            nextWeekMonday = location.nextWeekMonday,
-            beforeStart = location.beforeStart,
-            afterEnd = location.afterEnd,
-            loaded = true,
+            scheduleId = data.scheduleId, scheduleName = data.scheduleName, scheduleVersion = data.reminderVersion,
+            courses = data.courses, sectionTimes = data.sectionTimes, semester = semester,
+            selectedWeek = resolved.coerceIn(1, semester.totalWeeks), currentWeek = location.week,
+            inHoliday = location.isHoliday, nextWeekMonday = location.nextWeekMonday,
+            beforeStart = location.beforeStart, afterEnd = location.afterEnd, loaded = true,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ScheduleUiState())
+
+    private val managingState = MutableStateFlow(false)
+    val managing: StateFlow<Boolean> = managingState
+
+    private fun manage(onSaved: () -> Unit = {}, block: suspend () -> Unit) {
+        if (managingState.value) return
+        managingState.value = true
+        viewModelScope.launch {
+            try {
+                block()
+                settingsErrorState.value = null
+                onSaved()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                settingsErrorState.value = e.message ?: "操作失败，请重试"
+            } finally { managingState.value = false }
+        }
+    }
+
+    fun createSchedule(name: String, onSaved: () -> Unit) = manage(onSaved) { repo.createSchedule(name) }
+    fun renameSchedule(id: Long, name: String, onSaved: () -> Unit) = manage(onSaved) { repo.renameSchedule(id, name) }
+    fun switchSchedule(id: Long, onSaved: () -> Unit = {}) = manage(onSaved) { repo.switchSchedule(id) }
+    fun clearSchedule(id: Long, onSaved: () -> Unit) = manage(onSaved) { repo.clearSchedule(id) }
+    fun deleteSchedule(id: Long, onSaved: () -> Unit) = manage(onSaved) { repo.deleteSchedule(id) }
 
     val reminderEnabled: StateFlow<Boolean> = repo.settings.reminderEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -141,15 +198,15 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReminderScheduleInfo())
 
     fun setHideWeekend(hidden: Boolean) {
-        viewModelScope.launch { repo.settings.setHideWeekend(hidden) }
+        changeSetting { repo.settings.setHideWeekend(hidden) }
     }
 
     fun setHideInactiveCourses(hidden: Boolean) {
-        viewModelScope.launch { repo.settings.setHideInactiveCourses(hidden) }
+        changeSetting { repo.settings.setHideInactiveCourses(hidden) }
     }
 
     fun setReminder(enabled: Boolean, minutes: Int) {
-        viewModelScope.launch { repo.settings.setReminder(enabled, minutes) }
+        changeSetting { repo.settings.setReminder(enabled, minutes) }
     }
 
     fun setThemeMode(mode: SettingsStore.ThemeMode) {
@@ -162,12 +219,6 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // 每个前台会话（含首次冷启动）都把选中周打回"未选"，由 uiState 重新解析为当前周。
         // 冷启动 epoch 从 0 开始、StateFlow 立即发射，因此首次启动同样走这条路径。
-        //
-        // 之前这里是"collect semester，且 selectedWeek 为 null 时写入当前周"，有两个毛病：
-        //   1. 只能覆盖冷启动，App 挂后台再回来不会重新定位；
-        //   2. 它要等 DataStore 异步读盘，必然晚于 Pager 的第一帧回写
-        //      （见 ScheduleScreen 里的 drop(1)），于是每次启动都被初始页 0
-        //      抢先写成"第 1 周"，且写完后非空，定位永远不再发生。
         viewModelScope.launch {
             AppSession.epoch.collect { epoch ->
                 selectedWeek.value = null
@@ -176,45 +227,27 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
                 sessionEpoch.value = epoch
             }
         }
-        // 课程/节次/学期/提醒设置任一变化 → 全量重排上课提醒闹钟。
-        // 必须按值去重：reschedule() 内部会把已排 requestCode 写回 DataStore(REMINDER_CODES)，
-        // 而下面几个设置流都源自同一个 DataStore.data，写任何键都会让它们重新发射（map 不去重），
-        // 不去重就会形成「重排→写 codes→重新发射→重排」的自激循环，闹钟被反复取消重设。
-        // 节次时间必须在键里：重新导入只改节次不改课程时，ReminderKey 不含它会被去重抑制，
-        // 当天提醒仍按旧时刻触发（此前只靠次日脉冲自愈）。节次表无 DataStore 回写，无自激风险。
+        // 只观察一致快照；切换同时刷新桌面和提醒，记录回写不会触发自激循环。
         viewModelScope.launch {
-            combine(
-                repo.courses,
-                repo.sectionTimes,
-                repo.settings.semester,
-                repo.settings.reminderEnabled,
-                repo.settings.reminderMinutes,
-            ) { courses, sections, semester, enabled, minutes ->
-                ReminderKey(courses, sections, semester, enabled, minutes)
-            }.distinctUntilChanged().collect {
-                // 重排失败只允许"本轮不重排"：异常逃出 viewModelScope 会直接崩进程
-                // （SettingsStore 的 DataStore 读可能抛 IOException、精确闹钟权限
-                // 也可能在 check-then-act 窗口里被收回）
-                runCatching { ClassReminderScheduler.reschedule(getApplication()) }
-                    .onFailure { e -> if (e is CancellationException) throw e }
+            combine(snapshot, repo.settings.reminderEnabled, repo.settings.reminderMinutes, sessionEpoch) { data, enabled, minutes, epoch ->
+                Triple(data, enabled, minutes) to epoch
+            }.distinctUntilChanged().collect { _ ->
+                refreshWidget()
+                try {
+                    ClassReminderScheduler.reschedule(getApplication())
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    settingsErrorState.value = "课表已保存，上课提醒暂未更新，请重新打开应用重试"
+                }
             }
         }
     }
 
-    /** 重排触发条件的值快照：用于过滤 DataStore 的无关键写入（见 init 注释）。 */
-    private data class ReminderKey(
-        val courses: List<CourseEntity>,
-        val sectionTimes: List<SectionTimeEntity>,
-        val semester: SettingsStore.SemesterConfig,
-        val enabled: Boolean,
-        val minutes: Int,
-    )
-
     /** Widget 点击时显式回到当前周，即使 Activity 已经在前台。 */
     fun showCurrentWeek() {
-        viewModelScope.launch {
-            val semester = repo.settings.semester.first()
-            selectedWeek.value = WeekResolver.defaultWeek(WeekResolver.locateWeek(semester), semester.totalWeeks)
+        changeSetting {
+            val data = repo.getScheduleSnapshot()
+            selectedWeek.value = Triple(data.scheduleId, data.reminderVersion, WeekResolver.defaultWeek(WeekResolver.locateWeek(data.semester), data.semester.totalWeeks))
         }
     }
 
@@ -223,91 +256,31 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectWeek(week: Int) {
-        selectedWeek.value = week
+        val state = uiState.value
+        if (state.loaded) selectedWeek.value = Triple(state.scheduleId, state.scheduleVersion, week)
     }
 
-    fun saveCourse(course: CourseEntity) {
-        viewModelScope.launch {
-            if (course.id == 0L) repo.addManualCourse(course) else repo.updateCourse(course)
-            refreshWidget()
-        }
+    fun saveCourses(scheduleId: Long, courses: List<CourseEntity>, replaceIds: List<Long>?, onSaved: () -> Unit = {}) {
+        manage(onSaved) { repo.replaceCourses(scheduleId, replaceIds.orEmpty(), courses) }
     }
 
-    /**
-     * 批量保存一门课：编辑场景先删除被替换的全部旧行，再插入展开后的全部时段行（单事务）。
-     * 多时段课程编辑：传入该课程的所有行（同名同源），先删旧行再插入新行。
-     */
-    fun saveCourses(courses: List<CourseEntity>, replaceIds: List<Long>?) {
-        viewModelScope.launch {
-            repo.replaceCourses(replaceIds.orEmpty(), courses)
-            refreshWidget()
-        }
+    fun setCoursesHidden(scheduleId: Long, ids: List<Long>, hidden: Boolean) {
+        changeSetting { repo.setCoursesHidden(scheduleId, ids, hidden) }
     }
 
-    /** 按名字+源加载一门课的全部行（多时段课程整体编辑用）。 */
-    fun observeCourseByName(sources: List<Int>, name: String) =
-        repo.observeCourseByName(sources, name)
-
-    /** 隐藏/恢复教务导入课程。 */
-    fun setCourseHidden(id: Long, hidden: Boolean) {
-        viewModelScope.launch {
-            repo.setCourseHidden(id, hidden)
-            refreshWidget()
-        }
-    }
-
-    /**
-     * 批量隐藏/恢复一组课程行（同一张卡片对应的全部存储行）。
-     *
-     * 单行的 [setCourseHidden] 只够处理"一行 = 一张卡"的简单课程；教务单双周/调课拆行
-     * 与手动多时段课都是多行合并成一张卡，只改一行会让卡片继续留在网格上。
-     */
-    fun setCoursesHidden(ids: List<Long>, hidden: Boolean) {
-        viewModelScope.launch {
-            repo.setCoursesHidden(ids, hidden)
-            refreshWidget()
-        }
-    }
-
-    fun deleteCourse(id: Long) {
-        viewModelScope.launch {
-            repo.deleteCourse(id)
-            refreshWidget()
-        }
-    }
-
-    /** 从 assets 载入示例课表；若未设置开学日期，则把本周一设为第 1 周周一便于立即查看。 */
+    /** 示例只在用户明确点击后写入当前课表。 */
     fun loadSampleData() {
-        viewModelScope.launch {
+        val id = uiState.value.scheduleId
+        manage {
             val ctx = getApplication<Application>()
-            val coursesJson = ctx.assets.open("sample/courses.json").bufferedReader().use { it.readText() }
-            val sectionsJson = ctx.assets.open("sample/sections.json").bufferedReader().use { it.readText() }
-            repo.loadSampleData(JwParser.parseCourses(coursesJson), JwParser.parseSectionTimes(sectionsJson))
-            val semester = repo.settings.semester.first()
-            if (semester.firstMonday.isBlank()) {
-                val monday = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-                repo.settings.saveSemester(
-                    semester.copy(
-                        name = if (semester.name.isBlank()) "示例学期" else semester.name,
-                        firstMonday = monday.toString(),
-                    )
-                )
-            }
-            refreshWidget()
+            val courses = ctx.assets.open("sample/courses.json").bufferedReader().use { it.readText() }
+            val sections = ctx.assets.open("sample/sections.json").bufferedReader().use { it.readText() }
+            repo.loadSampleData(id, JwParser.parseCourses(courses), JwParser.parseSectionTimes(sections))
         }
     }
 
     fun clearSampleData() {
-        viewModelScope.launch {
-            repo.clearSampleData()
-            refreshWidget()
-        }
-    }
-
-    fun saveSemester(config: SettingsStore.SemesterConfig) {
-        viewModelScope.launch {
-            repo.settings.saveSemester(config)
-            refreshWidget()
-        }
+        val id = uiState.value.scheduleId
+        manage { repo.clearSampleData(id) }
     }
 }

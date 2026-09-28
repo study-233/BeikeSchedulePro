@@ -50,18 +50,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         }.getOrDefault(""),
     )
 
-    /** 「隐藏本周不上的课」：与课表页共用同一个 DataStore 键，两边即时同步。 */
-    val hideInactiveCourses: StateFlow<Boolean> = settings.hideInactiveCourses
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    fun setHideInactiveCourses(hidden: Boolean) {
-        viewModelScope.launch { settings.setHideInactiveCourses(hidden) }
-    }
-
-    init {
-        checkUpdate()
-    }
-
     fun setThemeMode(mode: SettingsStore.ThemeMode) {
         viewModelScope.launch {
             settings.setThemeMode(mode)
@@ -69,20 +57,16 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 清除成绩本地缓存（含考试安排与学业进度，下次进教务 Tab 重新抓取）。 */
+    /** 清除成绩本地缓存（含教务考试与学业进度，保留手动考试，下次进教务 Tab 重新抓取）。 */
     fun clearGradesCache() {
         viewModelScope.launch {
             val repo = ScheduleRepository(getApplication())
             settings.saveGradesMeta("", 0L)
             settings.saveCreditMeta("", "")
             repo.replaceGrades(emptyList())
-            repo.replaceExams(emptyList())
-            // 考试数据已清空 → 同步取消已排的考前提醒
-            // （否则成绩清完了，旧的"明天考试"闹钟还会带着地点/座位号弹出来）。
-            // cancelDueAlarms = true：用户显式清空，连"已到点但系统还没投递"的那条
-            // 也不要再弹；日常重排必须保持默认 false，否则会丢掉 Doze 下未投递的提醒。
-            // runCatching：重排异常逃出 viewModelScope 会崩进程，这里只允许"本轮不重排"。
-            runCatching { ExamReminderScheduler.reschedule(getApplication(), cancelDueAlarms = true) }
+            repo.replaceImportedExams(emptyList())
+            // 只撤销已删除的教务考试提醒，保留手动考试及其已到点的待投递提醒。
+            runCatching { ExamReminderScheduler.reschedule(getApplication()) }
                 .onFailure { e -> if (e is CancellationException) throw e }
         }
     }

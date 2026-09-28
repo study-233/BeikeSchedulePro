@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.LocalContext
@@ -304,12 +306,22 @@ fun JwWebView(
     bridge: JwBridge,
     bridgeName: String,
     onMainPage: () -> Unit,
+    additionalBridges: Map<String, JwBridge> = emptyMap(),
+    modifier: Modifier = Modifier.fillMaxSize(),
+    interactive: Boolean = true,
     onCreated: (WebView) -> Unit = {},
     onPageStarted: () -> Unit = {},
     onPageError: (String) -> Unit = {},
     onPageProgress: (Int) -> Unit = {},
     onAuthPageChanged: (Boolean) -> Unit = {},
 ) {
+    val bridges by rememberUpdatedState(additionalBridges + (bridgeName to bridge))
+    val mainPageCallback by rememberUpdatedState(onMainPage)
+    val startedCallback by rememberUpdatedState(onPageStarted)
+    val errorCallback by rememberUpdatedState(onPageError)
+    val progressCallback by rememberUpdatedState(onPageProgress)
+    val authCallback by rememberUpdatedState(onAuthPageChanged)
+    val createdCallback by rememberUpdatedState(onCreated)
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentView = remember { arrayOfNulls<WebView>(1) }
@@ -352,7 +364,7 @@ fun JwWebView(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     AndroidView(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
         factory = {
             // 仅调试包允许 DevTools 远程调试 WebView
             if (it.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
@@ -384,15 +396,13 @@ fun JwWebView(
                 // 桥：平台按 origin 限定可见范围（见类注释），回调里再校验主框架 + 教务域名。
                 // 两条 origin 规则覆盖"教务站点本体"与"统一认证可能用到的其它 ustb 子域"，
                 // 保证登录页上手动抓取失败时仍能把错误经桥报回界面（而不是静默无反应）。
-                WebViewCompat.addWebMessageListener(
-                    this,
-                    bridgeName,
-                    BRIDGE_ORIGINS,
-                ) { _, message, sourceOrigin, isMainFrame, _ ->
-                    if (!isMainFrame) return@addWebMessageListener
-                    val host = sourceOrigin.host?.lowercase() ?: return@addWebMessageListener
-                    if (!isJwHost(host)) return@addWebMessageListener
-                    message.data?.let(bridge::dispatch)
+                bridges.keys.forEach { name ->
+                    WebViewCompat.addWebMessageListener(this, name, BRIDGE_ORIGINS) { sourceView, message, sourceOrigin, isMainFrame, _ ->
+                        if (currentView[0] !== sourceView || !isMainFrame) return@addWebMessageListener
+                        val host = sourceOrigin.host?.lowercase() ?: return@addWebMessageListener
+                        if (!isJwHost(host)) return@addWebMessageListener
+                        message.data?.let { payload -> bridges[name]?.dispatch(payload) }
+                    }
                 }
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                     WebViewCompat.addDocumentStartJavaScript(
@@ -446,27 +456,29 @@ fun JwWebView(
                     }
 
                     override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                        if (currentView[0] !== view) return
                         if (isSsoLoginPageUrl(url)) {
                             pendingCompletionUrl[0] = null
                             completionRetryCount[0] = 0
                         }
-                        onPageStarted()
-                        onAuthPageChanged(isAuthPageUrl(url))
+                        startedCallback()
+                        authCallback(isAuthPageUrl(url))
                         // 尽早注入，MutationObserver 会在 meta 标签解析出来时立即改写。
                         if (isByytUrl(url)) view.evaluateJavascript(PAGE_FIX_JS, null)
                     }
 
                     override fun onPageFinished(view: WebView, url: String) {
+                        if (currentView[0] !== view) return
                         // 兜底注入（脚本幂等），覆盖 onPageStarted 时机过晚的情况
                         if (isByytUrl(url)) view.evaluateJavascript(PAGE_FIX_JS, null)
                         if (isAuthPageUrl(url)) view.evaluateJavascript(SMS_CAPTCHA_VIEWPORT_JS, null)
-                        onAuthPageChanged(isAuthPageUrl(url))
+                        authCallback(isAuthPageUrl(url))
                         if (isByytLandingUrl(url)) view.evaluateJavascript(OPEN_SCHOOL_AUTH_JS, null)
                         // 主页面判定改为 host + path **精确**匹配：
                         // 此前是 url.contains("/authentication/main")，任意域名下含该路径的
                         // URL（如 https://evil.example/authentication/main）都会触发抓取脚本注入。
                         if (isMainPageUrl(url)) {
-                            view.post { onMainPage() }
+                            view.post { if (currentView[0] === view && isMainPageUrl(view.url.orEmpty())) mainPageCallback() }
                         }
                     }
 
@@ -485,7 +497,7 @@ fun JwWebView(
                                 continuePendingCompletion()
                                 return
                             }
-                            onPageError(
+                            errorCallback(
                                 if (isSchoolQrCompletionUrl(request.url)) {
                                     "微信授权已完成，但学校认证回跳失败：${error.description}。请检查网络后重试登录。"
                                 } else {
@@ -501,7 +513,7 @@ fun JwWebView(
                         errorResponse: android.webkit.WebResourceResponse,
                     ) {
                         if (request.isForMainFrame) {
-                            onPageError("页面返回错误：HTTP ${errorResponse.statusCode}")
+                            errorCallback("页面返回错误：HTTP ${errorResponse.statusCode}")
                         }
                     }
 
@@ -511,25 +523,36 @@ fun JwWebView(
                         error: android.net.http.SslError,
                     ) {
                         handler.cancel()
-                        onPageError("SSL 证书校验失败（${error.primaryError}），请检查网络/VPN")
+                        errorCallback("SSL 证书校验失败（${error.primaryError}），请检查网络/VPN")
                     }
                 }
                 webChromeClient = object : android.webkit.WebChromeClient() {
                     override fun onProgressChanged(view: WebView, newProgress: Int) {
-                        onPageProgress(newProgress)
+                        progressCallback(newProgress)
                     }
                 }
                 loadUrl(JW_HOME)
-                onCreated(this)
+                createdCallback(this)
             }
+        },
+        update = { view ->
+            view.visibility = if (interactive) android.view.View.VISIBLE else android.view.View.INVISIBLE
+            view.isEnabled = interactive
+            view.isFocusable = interactive
+            view.isFocusableInTouchMode = interactive
+            view.importantForAccessibility = if (interactive) android.view.View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                else android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            view.descendantFocusability = if (interactive) android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
+                else android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            if (!interactive) view.clearFocus()
         },
         // WebView 必须显式销毁：AndroidView 离开组合时若只丢掉引用，持有 Activity context 的
         // WebView 与其 JS 定时器（PAGE_FIX_JS 里的 MutationObserver / setTimeout）会一起泄漏。
-        // 导入页的"预览 → 重新抓取"会反复创建新实例，成绩页每次抓取完成后也会销毁一个。
+        // 宿主在全部网络任务结束后移除唯一实例；预览和原生页面切换不销毁。
         onRelease = { view ->
             if (currentView[0] === view) currentView[0] = null
             pendingCompletionUrl[0] = null
-            runCatching { WebViewCompat.removeWebMessageListener(view, bridgeName) }
+            bridges.keys.forEach { name -> runCatching { WebViewCompat.removeWebMessageListener(view, name) } }
             runCatching { view.stopLoading() }
             runCatching { view.loadUrl("about:blank") }
             runCatching { view.destroy() }

@@ -5,9 +5,9 @@
  * queryXsksByxhList 参数带 p 前缀（pxn/pxq/ppylx）。
  * 结果经 BeikeGrades 桥回传：send('onGradesResult', [gpa, grades, user, xsxx, sem, exams, xflbyq, bxkqk])。
  */
-(function () {
-    if (window.__beikeGradesRunning) return;
-    window.__beikeGradesRunning = true;
+(function (requestId) {
+    if (window.__beikeGradesRunning === requestId) return;
+    window.__beikeGradesRunning = requestId;
 
     /**
      * 回传桥消息。桥由平台按 origin 限定（WebViewCompat.addWebMessageListener，
@@ -15,7 +15,7 @@
      */
     function send(fn, args) {
         try {
-            window.BeikeGrades.postMessage(JSON.stringify({ fn: fn, args: args }));
+            window.BeikeGrades.postMessage(JSON.stringify({ fn: fn, args: args, requestId: requestId }));
         } catch (e) { /* 桥不可用 */ }
     }
 
@@ -101,12 +101,12 @@
             }).catch(function () { return ''; }),
             fetchProgress(sem.XN, sem.XQ)
         ]).then(function (all) {
-            window.__beikeGradesRunning = false;
+            if (window.__beikeGradesRunning === requestId) window.__beikeGradesRunning = null;
             // all[0]=getgpa, all[1]=grcjcx, all[2]=queryxsxx, all[3]=考试, all[4]=[xflbyq, bxkqk]
             send('onGradesResult', [all[0], all[1], rs[1], all[2], rs[0], all[3], all[4][0], all[4][1]]);
         });
     }).catch(function (e) {
-        window.__beikeGradesRunning = false;
+        if (window.__beikeGradesRunning === requestId) window.__beikeGradesRunning = null;
         send('onError', [String(e)]);
     });
-})();
+})('__BEIKE_REQUEST_ID__');

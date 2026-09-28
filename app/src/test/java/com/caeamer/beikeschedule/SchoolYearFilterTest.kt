@@ -62,4 +62,13 @@ class SchoolYearFilterTest {
     fun `无匹配学年返回 null`() {
         assertNull(state.copy(schoolYearFilter = "1999-2000").weightedResult)
     }
+    @Test
+    fun `成绩列表与筛选一致且保留原始考试行`() {
+        val duplicate = grade("2024-2025-1").copy(bkcx = "补考", zzcj = "95")
+        val filtered = state.copy(grades = state.grades + duplicate, semesterFilter = "2024-2025-1")
+        assertEquals(listOf("2024-2025-1"), filtered.grouped.map { it.first })
+        assertEquals(2, filtered.grouped.single().second.size)
+        assertEquals(6, state.grouped.size)
+    }
+
 }

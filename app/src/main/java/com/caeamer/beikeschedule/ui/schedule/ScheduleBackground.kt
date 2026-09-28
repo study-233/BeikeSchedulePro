@@ -14,14 +14,12 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.caeamer.beikeschedule.data.local.ScheduleBackgroundStore
 import com.caeamer.beikeschedule.model.BackgroundScale
 import com.caeamer.beikeschedule.model.ScheduleAppearance
-import com.caeamer.beikeschedule.ui.theme.CourseColors
 
 internal data class ScheduleBackgroundImage(
     val name: String,
@@ -46,10 +44,9 @@ internal fun ScheduleBackground(
     modifier: Modifier = Modifier,
     image: ScheduleBackgroundImage = rememberScheduleBackground(appearance.backgroundFile),
 ) {
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Box(
         modifier.clipToBounds().background(
-            if (dark) CourseColors.scheduleGradientDark else CourseColors.scheduleGradient,
+            MaterialTheme.colorScheme.background,
         ),
     ) {
         image.bitmap?.let { bitmap ->

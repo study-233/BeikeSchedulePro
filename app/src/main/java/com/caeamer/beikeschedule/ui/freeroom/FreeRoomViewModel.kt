@@ -1,6 +1,7 @@
 package com.caeamer.beikeschedule.ui.freeroom
 
 import android.app.Application
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.caeamer.beikeschedule.data.pref.SettingsStore
@@ -54,7 +55,14 @@ data class FreeRoomUiState(
      * @param now 注入"现在"，便于单测与界面 ticker 复算
      */
     fun effectiveExpandedIndex(now: LocalTime = LocalTime.now()): Int =
-        expandedIndex ?: currentSlotIndex(now).takeIf { it >= 0 } ?: 0
+        expandedIndex ?: currentSlotIndex(now).takeIf { it >= 0 }
+            ?: orderedSlotIndices(now).firstOrNull { slotPhase(it, now) != SlotPhase.PAST } ?: 0
+
+    /** 正在进行/未来时段在前；已结束时段单独折叠。非法时间稳定地排在末尾。 */
+    fun orderedSlotIndices(now: LocalTime): List<Int> = slots.indices.sortedWith(
+        compareBy<Int> { slotPhase(it, now) == SlotPhase.PAST }
+            .thenBy { slots[it].startHm.toLocalTimeOrNull() ?: LocalTime.MAX }.thenBy { it },
+    )
 
     /**
      * 当前时间落在第几个大节（0 起）；不在任何时段内返回 -1。
@@ -106,12 +114,12 @@ private fun String.toLocalTimeOrNull(): LocalTime? = runCatching { LocalTime.par
  * 数据来源是校外平台（`ustb.smartclass.cn`），与教务系统相互独立、也无需登录。
  * 打开即查一次 + 下拉刷新；空教室是实时数据，不做跨会话缓存。
  */
-class FreeRoomViewModel(app: Application) : AndroidViewModel(app) {
+class FreeRoomViewModel(app: Application, private val savedState: SavedStateHandle) : AndroidViewModel(app) {
 
     private val settings = SettingsStore(app)
     private val repo = FreeRoomRepository(SmartClassKeyProvider(app, SmartClassApi()))
 
-    private val _state = MutableStateFlow(FreeRoomUiState())
+    private val _state = MutableStateFlow(FreeRoomUiState(expandedIndex = savedState.get<Int>("expanded")))
     val state: StateFlow<FreeRoomUiState> = _state.asStateFlow()
 
     /**
@@ -135,11 +143,14 @@ class FreeRoomViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleSlot(index: Int) {
         val cur = _state.value
         val next = if (cur.effectiveExpandedIndex() == index && cur.expandedIndex != -1) -1 else index
+        savedState["expanded"] = next
         _state.update { it.copy(expandedIndex = next) }
     }
 
     fun selectBuilding(buildingId: String) {
         if (buildingId == _state.value.selectedBuildingId) return
+        savedState["building"] = buildingId
+        savedState.set<Int?>("expanded", null)
         loadSeq++   // 作废在途请求，避免旧楼栋的响应盖在新楼栋上
         _state.update {
             it.copy(
@@ -160,7 +171,9 @@ class FreeRoomViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun refresh() = load(initial = false)
+    fun refresh() {
+        if (!_state.value.loading && !_state.value.refreshing) load(initial = false)
+    }
 
     /** 错误态下的重试。 */
     fun retry() = load(initial = _state.value.buildings.isEmpty())
@@ -173,8 +186,8 @@ class FreeRoomViewModel(app: Application) : AndroidViewModel(app) {
                     loading = initial,
                     refreshing = !initial,
                     error = null,
-                    // 刷新后回到"跟随当前时间"
-                    expandedIndex = null,
+                    // 首次恢复保留用户展开项；主动刷新回到当前时段。
+                    expandedIndex = if (initial) it.expandedIndex else null,
                 )
             }
             try {
@@ -202,7 +215,7 @@ class FreeRoomViewModel(app: Application) : AndroidViewModel(app) {
                             selectedBuildingId = selected,
                             slots = emptyList(),
                             loading = true,
-                            expandedIndex = null,
+                            expandedIndex = if (initial && savedState.get<String>("building") == selected) savedState.get<Int>("expanded") else null,
                             loadedAt = 0L,
                         )
                     }
@@ -210,6 +223,7 @@ class FreeRoomViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     _state.update { it.copy(buildings = meta.buildings) }
                 }
+                savedState["building"] = selected
                 loadRooms(selected)
             } catch (e: CancellationException) {
                 throw e

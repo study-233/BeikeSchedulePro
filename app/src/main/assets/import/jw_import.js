@@ -8,9 +8,9 @@
  * 失败则逐周 queryRlZcSj 兜底。产出统一结构：
  *   {"totalWeeks":18, "weeks":[{"zc":1,"monday":"2026-09-07"}, ...]}
  */
-(function () {
-    if (window.__beikeRunning) return;
-    window.__beikeRunning = true;
+(function (requestId) {
+    if (window.__beikeRunning === requestId) return;
+    window.__beikeRunning = requestId;
 
     /**
      * 回传桥消息。桥由平台按 origin 限定（WebViewCompat.addWebMessageListener，
@@ -20,7 +20,7 @@
      */
     function send(fn, args) {
         try {
-            window.BeikeImport.postMessage(JSON.stringify({ fn: fn, args: args }));
+            window.BeikeImport.postMessage(JSON.stringify({ fn: fn, args: args, requestId: requestId }));
         } catch (e) { /* 桥不可用 */ }
     }
 
@@ -129,13 +129,13 @@
                     var calendar = JSON.stringify({ totalWeeks: totalWeeks, weeks: weeks || [] });
                     // 成功路径也必须复位重入标志：否则"手动抓取"按钮在首次成功后
                     // 变成静默无操作的空按钮（jw_grades.js 一直在成功路径复位，此处是漏改）。
-                    window.__beikeRunning = false;
+                    if (window.__beikeRunning === requestId) window.__beikeRunning = null;
                     send('onResult', [semText, rs[0], rs[1], rs[2], rs[3], calendar]);
                 });
             });
         })
         .catch(function (e) {
-            window.__beikeRunning = false;
+            if (window.__beikeRunning === requestId) window.__beikeRunning = null;
             send('onError', [String(e)]);
         });
-})();
+})('__BEIKE_REQUEST_ID__');

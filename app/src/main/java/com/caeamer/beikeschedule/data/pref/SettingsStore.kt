@@ -9,6 +9,9 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import com.caeamer.beikeschedule.model.CampusSection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -73,6 +76,7 @@ class SettingsStore(private val context: Context) {
         val WEEK_MONDAYS = stringPreferencesKey("week_mondays")
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
         val REMINDER_MINUTES = intPreferencesKey("reminder_minutes")
+        val REMINDER_IDENTITY = stringPreferencesKey("reminder_schedule_identity")
         val REMINDER_CODES = stringPreferencesKey("reminder_codes")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val GPA_CACHE = stringPreferencesKey("gpa_cache")
@@ -94,6 +98,7 @@ class SettingsStore(private val context: Context) {
         val EXAM_REMINDER_CODES = stringPreferencesKey("exam_reminder_codes")
         val TODO_REMINDER_CODES = stringPreferencesKey("todo_reminder_codes")
         val FREE_ROOM_BUILDING = stringPreferencesKey("free_room_building")
+        val CAMPUS_SECTION = stringPreferencesKey("campus_section")
         val FREE_ROOM_TAB_INDEX = intPreferencesKey("free_room_tab_index")
     }
 
@@ -121,27 +126,17 @@ class SettingsStore(private val context: Context) {
         }
     }
 
-    val semester: Flow<SemesterConfig> = context.dataStore.data.map { p ->
-        SemesterConfig(
-            xn = p[Keys.XN] ?: "",
-            xq = p[Keys.XQ] ?: "",
-            name = p[Keys.NAME] ?: "",
-            firstMonday = p[Keys.FIRST_MONDAY] ?: "",
-            totalWeeks = p[Keys.TOTAL_WEEKS] ?: 20,
-            weekMondays = p[Keys.WEEK_MONDAYS].toWeekMondays(),
-        )
-    }
+    private fun readSemester(p: Preferences) = SemesterConfig(
+        xn = p[Keys.XN] ?: "",
+        xq = p[Keys.XQ] ?: "",
+        name = p[Keys.NAME] ?: "",
+        firstMonday = p[Keys.FIRST_MONDAY] ?: "",
+        totalWeeks = p[Keys.TOTAL_WEEKS] ?: 20,
+        weekMondays = p[Keys.WEEK_MONDAYS].toWeekMondays(),
+    )
 
-    suspend fun saveSemester(config: SemesterConfig) {
-        context.dataStore.edit { p ->
-            p[Keys.XN] = config.xn
-            p[Keys.XQ] = config.xq
-            p[Keys.NAME] = config.name
-            p[Keys.FIRST_MONDAY] = config.firstMonday
-            p[Keys.TOTAL_WEEKS] = config.totalWeeks
-            p[Keys.WEEK_MONDAYS] = config.weekMondays.joinToString(",")
-        }
-    }
+    /** 仅供 v5 → v6 一次性迁移读取；新学期配置由 Room 按课表保存。 */
+    internal val semester: Flow<SemesterConfig> = context.dataStore.data.map(::readSemester)
 
     val reminderEnabled: Flow<Boolean> =
         context.dataStore.data.map { it[Keys.REMINDER_ENABLED] ?: false }
@@ -160,8 +155,13 @@ class SettingsStore(private val context: Context) {
     val reminderScheduledAlarms: Flow<List<ScheduledAlarm>> =
         context.dataStore.data.map { p -> AlarmCodec.decode(p[Keys.REMINDER_CODES]) }
 
-    suspend fun saveReminderScheduledAlarms(alarms: List<ScheduledAlarm>) {
-        context.dataStore.edit { p -> p[Keys.REMINDER_CODES] = AlarmCodec.encode(alarms) }
+    val reminderScheduleIdentity: Flow<String> = context.dataStore.data.map { it[Keys.REMINDER_IDENTITY].orEmpty() }
+
+    suspend fun saveReminderScheduledAlarms(alarms: List<ScheduledAlarm>, identity: String) {
+        context.dataStore.edit { p ->
+            p[Keys.REMINDER_CODES] = AlarmCodec.encode(alarms)
+            p[Keys.REMINDER_IDENTITY] = identity
+        }
     }
 
     /** 已排考试提醒闹钟（requestCode + 触发时刻），语义同上。 */
@@ -282,18 +282,17 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { p -> p[Keys.FREE_ROOM_BUILDING] = buildingId }
     }
 
-    /**
-     * 教务 Tab 上次停留的分段下标（0=无课教室 1=成绩 2=考试）。
-     *
-     * 默认 0：用户明确要求"默认打开教务是无课教室"。
-     * 键名 `free_room_tab_index` 是历史遗留（该分段当时只有无课教室），
-     * 实际存的是**整个教务 Tab** 的分段，不是无课教室自己的状态。
-     */
-    val gradesTabIndex: Flow<Int> =
-        context.dataStore.data.map { it[Keys.FREE_ROOM_TAB_INDEX] ?: 0 }
+    val campusSection: Flow<CampusSection> = flow {
+        context.dataStore.edit { p ->
+            val section = CampusSection.restore(p[Keys.CAMPUS_SECTION], p[Keys.FREE_ROOM_TAB_INDEX])
+            p[Keys.CAMPUS_SECTION] = section.id
+            p.remove(Keys.FREE_ROOM_TAB_INDEX)
+        }
+        emitAll(context.dataStore.data.map { CampusSection.restore(it[Keys.CAMPUS_SECTION]) }.distinctUntilChanged())
+    }
 
-    suspend fun setGradesTabIndex(index: Int) {
-        context.dataStore.edit { p -> p[Keys.FREE_ROOM_TAB_INDEX] = index }
+    suspend fun setCampusSection(section: CampusSection) {
+        context.dataStore.edit { p -> p[Keys.CAMPUS_SECTION] = section.id }
     }
 
     private companion object {

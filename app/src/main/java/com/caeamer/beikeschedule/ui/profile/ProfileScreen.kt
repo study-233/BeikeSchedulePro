@@ -4,34 +4,18 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,361 +23,101 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.Book
-import androidx.compose.material.icons.filled.Class
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Grade
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.HowToReg
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Logout
-import androidx.compose.material.icons.filled.MailOutline
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Science
-import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.Box
-// 上面 6-17 行已 import 过 Column/Row/Spacer/fillMaxSize…，此处只保留 Box 与新增的 WindowInsets，
-// 原先这 12 行是重复粘贴（Kotlin 只报 Duplicate import 警告，故一直被忽略）
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.caeamer.beikeschedule.AppInfo
-import com.caeamer.beikeschedule.R
 import com.caeamer.beikeschedule.data.pref.SettingsStore
 import com.caeamer.beikeschedule.import.clearJwSession
-import com.caeamer.beikeschedule.ui.settings.ScheduleAppearanceDialog
 import com.caeamer.beikeschedule.ui.settings.SettingsViewModel
 import com.caeamer.beikeschedule.ui.settings.UpdateState
 
-/** 我的 Tab：学籍信息 + 主题 / 检查更新 / GitHub / 版本号 / 清缓存 + 维护者。 */
-@OptIn(ExperimentalMaterial3Api::class)
+import com.caeamer.beikeschedule.model.SettingsPage
+import com.caeamer.beikeschedule.ui.common.AddScheduleWidgetRow
+import com.caeamer.beikeschedule.ui.common.PageHeader
+import com.caeamer.beikeschedule.ui.common.SettingsGroup
+import com.caeamer.beikeschedule.ui.common.SettingsRow
+import androidx.activity.compose.BackHandler
+
+/** 我的：紧凑身份摘要和分组设置；二级页交由应用宿主管理。 */
 @Composable
-fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
-    // withLifecycle：退到后台停止收集
+fun ProfileScreen(onSettings: (SettingsPage) -> Unit, onAcademic: () -> Unit,
+                  onClearSample: () -> Unit, hasSample: Boolean,
+                  viewModel: SettingsViewModel = viewModel()) {
+    val academicSession: com.caeamer.beikeschedule.import.AcademicSessionViewModel = viewModel()
+    val openAcademic = { academicSession.startGrades(); onAcademic() }
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
-    val hideInactiveCourses by viewModel.hideInactiveCourses.collectAsStateWithLifecycle()
     val update by viewModel.update.collectAsStateWithLifecycle()
     val studentProfile by viewModel.studentProfile.collectAsStateWithLifecycle()
     val appVersion by viewModel.appVersion.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var showUpdateDialog by remember { mutableStateOf(false) }
-    var showClearCacheConfirm by remember { mutableStateOf(false) }
-    var showLogoutConfirm by remember { mutableStateOf(false) }
-    var showThemeDialog by remember { mutableStateOf(false) }
-    var showAppearance by rememberSaveable { mutableStateOf(false) }
-    if (showAppearance) {
-        ScheduleAppearanceDialog(onDismiss = { showAppearance = false })
-    }
-
-    Scaffold(
-        // 外层 Scaffold（MainActivity）已用 navigationBarsPadding 预留底部 Tab 栏高度，
-        // 内层若用默认 contentWindowInsets 会再吃一遍导航栏 inset，底部多出一条空白。
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            // 紧凑矮顶栏（外层 Scaffold 不消费状态栏 inset，这里自行处理）——透明透出整屏渐变
-            Surface(color = Color.Transparent) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .height(48.dp)
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("我的", style = MaterialTheme.typography.titleMedium)
-                }
+    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+    var showClearCacheConfirm by rememberSaveable { mutableStateOf(false) }
+    var showLogoutConfirm by rememberSaveable { mutableStateOf(false) }
+    var showThemeDialog by rememberSaveable { mutableStateOf(false) }
+    var showClearSample by rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize()) {
+        PageHeader("我的")
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            SettingsGroup("学籍") {
+                SettingsRow(
+                    if (studentProfile.isLoggedIn) studentProfile.xm.ifBlank { "学籍信息" } else "获取学籍信息",
+                    if (studentProfile.isLoggedIn) listOf(studentProfile.xh, studentProfile.zymc).filter { it.isNotBlank() }.joinToString(" · ")
+                    else "登录教务系统并获取成绩后显示",
+                    { if (studentProfile.isLoggedIn) onSettings(SettingsPage.STUDENT) else openAcademic() },
+                )
             }
-        },
-    ) { padding ->
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            // —— 学籍信息 ——（一张大卡片，内部 label:value 多行）
-            Text(
-                "学籍信息",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            Card(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    if (studentProfile.isLoggedIn) {
-                        // 账户头：姓名大字 + 学号小字，其余字段降为普通行
-                        if (studentProfile.xm.isNotBlank()) {
-                            Text(
-                                studentProfile.xm,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                        if (studentProfile.xh.isNotBlank()) {
-                            Text(
-                                studentProfile.xh,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (studentProfile.xm.isNotBlank() || studentProfile.xh.isNotBlank()) {
-                            HorizontalDivider(Modifier.padding(vertical = 10.dp))
-                        }
-                        if (studentProfile.yxmc.isNotBlank()) ProfileRow("学院", studentProfile.yxmc)
-                        if (studentProfile.zymc.isNotBlank()) ProfileRow("专业", studentProfile.zymc)
-                        if (studentProfile.bjmc.isNotBlank()) ProfileRow("班级", studentProfile.bjmc)
-                        if (studentProfile.njmc.isNotBlank()) ProfileRow("年级", studentProfile.njmc)
-                        // 字段缺失（空串）不能当成否定结论：只有服务端明确返回了才展示对应半边，
-                        // 否则一个字段缺失会渲染出"不在校 · 已注册"这种凭空断言的文案。
-                        val statusParts = listOfNotNull(
-                            studentProfile.xjsfzx.takeIf { it.isNotBlank() }
-                                ?.let { if (it == "1") "在校" else "不在校" },
-                            studentProfile.xjsfzc.takeIf { it.isNotBlank() }
-                                ?.let { if (it == "1") "已注册" else "未注册" },
-                        )
-                        if (statusParts.isNotEmpty()) {
-                            ProfileRow("学籍状态", statusParts.joinToString(" · "))
-                        }
-                    } else {
-                        Text(
-                            "未获取学籍信息",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            "在教务 Tab 抓取一次成绩后自动显示",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        )
-                    }
-                }
+            SettingsGroup("课表") {
+                SettingsRow("课表管理", onClick = { onSettings(SettingsPage.MANAGE) })
+                SettingsRow("学期与校历", onClick = { onSettings(SettingsPage.SEMESTER) })
+                SettingsRow("课表显示", "字号、背景与课程显示", { onSettings(SettingsPage.DISPLAY) })
+                AddScheduleWidgetRow()
+                SettingsRow("上课提醒", onClick = { onSettings(SettingsPage.REMINDER) })
+                SettingsRow("隐藏课程", onClick = { onSettings(SettingsPage.HIDDEN) })
+                if (hasSample) SettingsRow("清除示例课表", onClick = { showClearSample = true }, destructive = true)
             }
-
-            Spacer(Modifier.height(16.dp))
-
-            // —— 通用功能 ——（每行独立卡片：图标 + 功能名 + 右侧按钮）
-            Text(
-                "通用",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            val updateSubtitle = when (val u = update) {
-                is UpdateState.Checking -> "正在检查…"
-                is UpdateState.UpToDate -> "已是最新版本"
-                is UpdateState.Available -> "发现新版本 v${u.latestVersion}"
-                is UpdateState.Failed -> u.message
-                UpdateState.Idle -> "检查 GitHub Releases"
-            }
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.SystemUpdate, null, Modifier.size(20.dp)) },
-                title = "检查更新",
-                value = updateSubtitle,
-                trailing = if (update is UpdateState.Available) {
-                    { TextButton(onClick = { showUpdateDialog = true }) { Text("查看") } }
-                } else {
-                    { TextButton(onClick = { viewModel.checkUpdate() }) { Text("检查") } }
-                },
-                onClick = {
-                    val u = update
-                    if (u is UpdateState.Available) showUpdateDialog = true else viewModel.checkUpdate()
-                },
-            )
-            SettingsItemRow(
-                icon = { Icon(painterResource(R.drawable.ic_github), "GitHub", Modifier.size(20.dp)) },
-                title = "GitHub 仓库",
-                value = "查看源码",
-                trailing = {
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                onClick = {
-                    context.openExternal(
-                        Intent(Intent.ACTION_VIEW, Uri.parse(AppInfo.REPO_URL)),
-                        "未找到可打开网页的应用",
-                    )
-                },
-            )
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.Badge, null, Modifier.size(20.dp)) },
-                title = "版本",
-                value = appVersion,
-            )
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.MailOutline, null, Modifier.size(20.dp)) },
-                title = "联系开发者",
-                value = "${AppInfo.CONTACT_EMAIL} · 问题反馈与建议",
-                trailing = {
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                onClick = {
-                    context.openExternal(
-                        Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${AppInfo.CONTACT_EMAIL}")).apply {
-                            putExtra(Intent.EXTRA_SUBJECT, "贝壳课表 反馈")
-                            putExtra(Intent.EXTRA_TEXT, "（请描述你遇到的问题或建议；版本 $appVersion）")
-                        },
-                        "未找到邮件客户端，可直接发信至 ${AppInfo.CONTACT_EMAIL}",
-                    )
-                },
-            )
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.DeleteSweep, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error) },
-                title = "清除成绩缓存",
-                value = "成绩 / GPA / 考试安排 / 学业进度",
-                destructive = true,
-                onClick = { showClearCacheConfirm = true },
-            )
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.Logout, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error) },
-                title = "退出教务登录",
-                value = "清除本机保存的教务会话（不删除课表与成绩）",
-                destructive = true,
-                onClick = { showLogoutConfirm = true },
-            )
-
-            // —— 外部系统 ——（浏览器跳转；课程平台/实践平台地址待补后追加）
-            Text(
-                "外部系统",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.Grade, null, Modifier.size(20.dp)) },
-                title = "评教系统",
-                value = "教学评价",
-                trailing = {
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                onClick = {
-                    context.openExternal(
-                        Intent(Intent.ACTION_VIEW, Uri.parse(SettingsViewModel.PINGJIAO_URL)),
-                        "未找到可打开网页的应用",
-                    )
-                },
-            )
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.Science, null, Modifier.size(20.dp)) },
-                title = "大创 / SRTP",
-                value = "大学生创新创业训练计划",
-                trailing = {
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                onClick = {
-                    context.openExternal(
-                        Intent(Intent.ACTION_VIEW, Uri.parse(SettingsViewModel.SRTP_URL)),
-                        "未找到可打开网页的应用",
-                    )
-                },
-            )
-
-            // —— 课表显示 ——
-            Text(
-                "课表",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.Palette, null, Modifier.size(20.dp)) },
-                title = "课表外观",
-                value = "课程字号与背景图片",
-                onClick = { showAppearance = true },
-            )
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.VisibilityOff, null, Modifier.size(20.dp)) },
-                title = "隐藏本周不上的课",
-                value = if (hideInactiveCourses) {
-                    "已开启：本周没有安排的课不再显示"
-                } else {
-                    "单双周的另一半、还没到的调课周会淡化显示"
-                },
-                trailing = {
-                    // onCheckedChange = null：整个行是唯一的开关控件（见 SettingsItemRow 的
-                    // toggleable），Switch 只负责显示。否则 TalkBack 会把"行"和"Switch"
-                    // 报成两个独立控件，用户听到两个同名开关。
-                    Switch(checked = hideInactiveCourses, onCheckedChange = null)
-                },
-                onClick = { viewModel.setHideInactiveCourses(!hideInactiveCourses) },
-                toggleRole = true,
-                toggleValue = hideInactiveCourses,
-            )
-
-            // —— 主题 ——
-            Text(
-                "外观",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-            SettingsItemRow(
-                icon = { Icon(Icons.Default.Palette, null, Modifier.size(20.dp)) },
-                title = "主题",
-                value = when (themeMode) {
+            SettingsGroup("外观") {
+                SettingsRow("主题", when (themeMode) {
                     SettingsStore.ThemeMode.SYSTEM -> "跟随系统"
                     SettingsStore.ThemeMode.LIGHT -> "浅色"
                     SettingsStore.ThemeMode.DARK -> "深色"
-                },
-                trailing = {
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                // 循环切换不可发现（用户不知道点一下会变成什么），改为弹窗三选一
-                onClick = { showThemeDialog = true },
-            )
-
-            Spacer(Modifier.height(32.dp))
-            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "BeikeSchedulePro · ${AppInfo.DEVELOPER_NAME} 维护",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-            )
+                }, { showThemeDialog = true })
+            }
+            SettingsGroup("账号与数据") {
+                SettingsRow("教务账号", "登录后自动获取成绩与考试", openAcademic)
+                SettingsRow("清除成绩缓存", "成绩、GPA、教务考试与学业进度；保留手动考试", { showClearCacheConfirm = true }, destructive = true)
+                SettingsRow("退出教务登录", "保留本地课表与成绩", { showLogoutConfirm = true }, destructive = true)
+            }
+            SettingsGroup("关于") {
+                SettingsRow("检查更新", when (val u = update) {
+                    is UpdateState.Checking -> "正在检查…"
+                    is UpdateState.UpToDate -> "已是最新版本"
+                    is UpdateState.Available -> "发现新版本 v${u.latestVersion}"
+                    is UpdateState.Failed -> u.message
+                    UpdateState.Idle -> "检查 GitHub Releases"
+                }, { if (update is UpdateState.Available) showUpdateDialog = true else viewModel.checkUpdate() })
+                SettingsRow("版本", appVersion)
+                SettingsRow("项目仓库", "查看源码", {
+                    context.openExternal(Intent(Intent.ACTION_VIEW, Uri.parse(AppInfo.REPO_URL)), "未找到可打开网页的应用")
+                })
+                SettingsRow("联系开发者", AppInfo.CONTACT_EMAIL, {
+                    context.openExternal(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${AppInfo.CONTACT_EMAIL}")).apply {
+                        putExtra(Intent.EXTRA_SUBJECT, "贝壳课表 反馈")
+                        putExtra(Intent.EXTRA_TEXT, "（请描述你遇到的问题或建议；版本 $appVersion）")
+                    }, "未找到邮件客户端，可直接发信至 ${AppInfo.CONTACT_EMAIL}")
+                })
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
+    if (showClearSample) AlertDialog(onDismissRequest = { showClearSample = false },
+        title = { Text("清除示例课表") }, text = { Text("只删除示例课程，保留导入和手动添加的课程。") },
+        confirmButton = { TextButton(onClick = { onClearSample(); showClearSample = false }) { Text("清除") } },
+        dismissButton = { TextButton(onClick = { showClearSample = false }) { Text("取消") } })
 
     if (showUpdateDialog) {
         val u = update
@@ -417,41 +141,13 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
     }
 
     if (showThemeDialog) {
-        AlertDialog(
+        ThemePickerDialog(
+            selectedMode = themeMode,
+            onSelect = { mode ->
+                viewModel.setThemeMode(mode)
+                showThemeDialog = false
+            },
             onDismissRequest = { showThemeDialog = false },
-            title = { Text("主题") },
-            text = {
-                Column {
-                    listOf(
-                        SettingsStore.ThemeMode.SYSTEM to "跟随系统",
-                        SettingsStore.ThemeMode.LIGHT to "浅色",
-                        SettingsStore.ThemeMode.DARK to "深色",
-                    ).forEach { (mode, label) ->
-                        val selected = themeMode == mode
-                        Row(
-                            // selectable + Role.RadioButton：整行一个控件且能读出选中态；
-                            // RadioButton 置 onClick = null 只做展示（否则 TalkBack 报两个目标）
-                            Modifier
-                                .fillMaxWidth()
-                                .selectable(
-                                    selected = selected,
-                                    role = Role.RadioButton,
-                                    onClick = {
-                                        viewModel.setThemeMode(mode)
-                                        showThemeDialog = false
-                                    },
-                                ),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = selected, onClick = null)
-                            Text(label, style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showThemeDialog = false }) { Text("取消") }
-            },
         )
     }
 
@@ -460,16 +156,17 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
             onDismissRequest = { showClearCacheConfirm = false },
             title = { Text("清除成绩缓存") },
             // 文案必须写全：clearGradesCache() 实际清掉的不止成绩与 GPA，
-            // 还包括考试安排与学业进度（学分类别要求/毕业总进度），并取消已排的考前提醒。
+            // 还包括教务考试与学业进度，手动考试及其提醒保留。
             text = {
                 Text(
-                    "将删除本地的：成绩与 GPA、考试安排、学业进度（学分类别要求 / 毕业总进度），" +
-                        "并取消已排的考前提醒。\n\n" +
-                        "课表与隐藏设置不受影响。下次进入教务 Tab 需重新抓取。是否继续？",
+                    "将删除本地的：成绩与 GPA、教务考试安排、学业进度（学分类别要求 / 毕业总进度），" +
+                        "并取消这些教务考试的提醒。\n\n" +
+                        "手动考试及其提醒、课表与隐藏设置不受影响。教务数据需重新抓取。是否继续？",
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
+                    academicSession.cancelGrades()
                     viewModel.clearGradesCache()
                     showClearCacheConfirm = false
                 }) { Text("清除", color = MaterialTheme.colorScheme.error) }
@@ -491,6 +188,7 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
             },
             confirmButton = {
                 TextButton(onClick = {
+                    academicSession.cancelForLogout()
                     clearJwSession(context)
                     showLogoutConfirm = false
                     Toast.makeText(context, "已退出教务登录", Toast.LENGTH_SHORT).show()
@@ -501,77 +199,19 @@ fun ProfileScreen(viewModel: SettingsViewModel = viewModel()) {
     }
 }
 
-/** 设置列表项行：左侧几何图标 + 中间标题/值 + 右侧可点按钮（仿 Net-USTB）。 */
 @Composable
-private fun SettingsItemRow(
-    title: String,
-    value: String? = null,
-    trailing: (@Composable () -> Unit)? = null,
-    icon: (@Composable () -> Unit)? = null,
-    destructive: Boolean = false,
-    onClick: (() -> Unit)? = null,
-    /** 该行代表一个开关：整行用 toggleable + Role.Switch 暴露，trailing 的 Switch 只做展示。 */
-    toggleRole: Boolean = false,
-    /** toggleRole = true 时的当前开关状态。 */
-    toggleValue: Boolean = false,
-) {
-    Card(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)),
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .then(
-                    when {
-                        // 开关型行用 toggleable 而非 clickable：无障碍服务会把整行当作
-                        // 一个 Role.Switch 控件播报，而不是"可点区域 + 另一个开关"两个控件。
-                        onClick != null && toggleRole -> Modifier.toggleable(
-                            value = toggleValue,
-                            role = Role.Switch,
-                            onValueChange = { onClick() },
-                        )
-                        onClick != null -> Modifier.clickable(onClick = onClick)
-                        else -> Modifier
-                    },
-                )
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 图标容器：圆角浅色底，里面放几何图标
-            Box(
-                Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        if (destructive) {
-                            MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
-                        } else {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                        },
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                icon?.invoke() ?: Icon(Icons.Default.Info, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                )
-                if (!value.isNullOrBlank()) {
-                    Text(
-                        value,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            trailing?.invoke()
+fun StudentProfileScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
+    val profile by viewModel.studentProfile.collectAsStateWithLifecycle()
+    BackHandler(enabled = com.caeamer.beikeschedule.ui.common.LocalPageActive.current, onBack = onBack)
+    Column(Modifier.fillMaxSize()) {
+        PageHeader("学籍信息", onBack)
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+            listOf("姓名" to profile.xm, "学号" to profile.xh, "学院" to profile.yxmc,
+                "专业" to profile.zymc, "班级" to profile.bjmc, "年级" to profile.njmc,
+                "在校状态" to profile.xjsfzx.takeIf { it.isNotBlank() }?.let { if (it == "1") "在校" else "不在校" }.orEmpty(),
+                "注册状态" to profile.xjsfzc.takeIf { it.isNotBlank() }?.let { if (it == "1") "已注册" else "未注册" }.orEmpty(),
+            ).filter { it.second.isNotBlank() }.forEach { (label, value) -> ProfileRow(label, value) }
+            if (!profile.isLoggedIn) Text("暂无学籍信息，请在校园页获取成绩。")
         }
     }
 }

@@ -12,6 +12,10 @@ import com.caeamer.beikeschedule.model.CourseMerger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import com.caeamer.beikeschedule.data.repo.ScheduleRepository
+import com.caeamer.beikeschedule.model.ClassReminderIdentity
 
 /** 课程提醒、考试提醒与每日脉冲的接收器。 */
 class ReminderReceiver : BroadcastReceiver() {
@@ -19,14 +23,28 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ClassReminderScheduler.ACTION_REMIND -> {
-                // 只弹通知，绝不在此重排：reschedule 内部会先取消全部闹钟再重排"仍在未来"的，
-                // 若在提醒触发时重排，此刻已到点但尚未被系统投递的闹钟（Doze 延迟、同时间多节课）
-                // 会先被取消又不再重排，导致提醒永久丢失——这正是"时好时坏"的主因。
-                // 8 天排期窗口的前移由每日脉冲（ACTION_DAILY_PULSE）与开机/打开 App 时的重排负责。
-                showClassNotification(context, intent)
+                val pending = goAsync()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val repo = ScheduleRepository(context.applicationContext)
+                        val enabled = repo.settings.reminderEnabled.first()
+                        val snapshot = repo.getScheduleSnapshot()
+                        val courseId = intent.getLongExtra(ClassReminderScheduler.EXTRA_COURSE_ID, -1)
+                        if (enabled && ClassReminderIdentity.matches(
+                                intent.getLongExtra(ClassReminderScheduler.EXTRA_SCHEDULE_ID, -1),
+                                intent.getLongExtra(ClassReminderScheduler.EXTRA_VERSION, -1),
+                                snapshot.scheduleId, snapshot.reminderVersion,
+                            ) && snapshot.courses.any { it.id == courseId && !it.hidden && !it.isUnscheduled }) {
+                            showClassNotification(context, intent)
+                        }
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        // 无法确认归属时不显示旧通知；不在接收路径重排闹钟。
+                    } finally { pending.finish() }
+                }
             }
             ExamReminderScheduler.ACTION_EXAM_REMIND -> showExamNotification(context, intent)
-            TodoReminderScheduler.ACTION_TODO_REMIND -> showTodoNotification(context, intent)
+            TodoReminderScheduler.ACTION_TODO_REMIND -> Unit // 已下线：即便旧广播延迟到达也不展示通知。
             ClassReminderScheduler.ACTION_DAILY_PULSE -> rescheduleAsync(context)
         }
     }
@@ -36,11 +54,8 @@ class ReminderReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 // 根协程未捕获异常会直接崩进程，这里只允许失败为"本轮不重排"
-                runCatching {
-                    ClassReminderScheduler.reschedule(context.applicationContext)
-                    ExamReminderScheduler.reschedule(context.applicationContext)
-                    TodoReminderScheduler.reschedule(context.applicationContext)
-                }
+                runCatching { ClassReminderScheduler.reschedule(context.applicationContext) }
+                runCatching { ExamReminderScheduler.reschedule(context.applicationContext) }
             } finally {
                 pending.finish()
             }
@@ -94,27 +109,6 @@ class ReminderReceiver : BroadcastReceiver() {
             .build()
         context.getSystemService(NotificationManager::class.java)
             .notify(notificationId(intent, fallbackSeed = name), notification)
-    }
-
-    private fun showTodoNotification(context: Context, intent: Intent) {
-        if (notificationPermissionDenied(context)) return
-
-        TodoReminderScheduler.ensureChannel(context)
-        val title = intent.getStringExtra(TodoReminderScheduler.EXTRA_TITLE).orEmpty()
-        val timeText = intent.getStringExtra(TodoReminderScheduler.EXTRA_TIME_TEXT).orEmpty()
-        val minutes = intent.getIntExtra(TodoReminderScheduler.EXTRA_MINUTES, 15)
-
-        val content = listOf("计划 $timeText", "$minutes 分钟后开始").joinToString(" · ")
-        val notification = NotificationCompat.Builder(context, TodoReminderScheduler.CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("日程提醒：$title")
-            .setContentText(content)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-            .setContentIntent(openAppIntent(context))
-            .setAutoCancel(true)
-            .build()
-        context.getSystemService(NotificationManager::class.java)
-            .notify(notificationId(intent, fallbackSeed = title), notification)
     }
 
     /**

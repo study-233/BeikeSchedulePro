@@ -8,12 +8,13 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CourseEntity::class, SectionTimeEntity::class, GradeEntity::class, ExamEntity::class, TodoEntity::class],
-    version = 5,
+    entities = [CourseEntity::class, SectionTimeEntity::class, GradeEntity::class, ExamEntity::class, TodoEntity::class, ScheduleEntity::class, ScheduleStateEntity::class],
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
 
+    abstract fun scheduleDao(): ScheduleDao
     abstract fun courseDao(): CourseDao
     abstract fun sectionTimeDao(): SectionTimeDao
     abstract fun gradeDao(): GradeDao
@@ -78,6 +79,29 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** 仅迁移表结构；旧 DataStore 学期由 Repository 首次使用时幂等搬迁。 */
+        val MIGRATE_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS schedule (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL, createdAt INTEGER NOT NULL, xn TEXT NOT NULL, xq TEXT NOT NULL, semesterName TEXT NOT NULL, firstMonday TEXT NOT NULL, totalWeeks INTEGER NOT NULL, weekMondays TEXT NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS schedule_state (id INTEGER PRIMARY KEY NOT NULL, activeScheduleId INTEGER NOT NULL, reminderVersion INTEGER NOT NULL, initialized INTEGER NOT NULL)")
+                db.execSQL("INSERT INTO schedule VALUES (1, '默认课表', 0, '', '', '', '', 20, '')")
+                db.execSQL("INSERT INTO schedule_state VALUES (1, 1, 1, 0)")
+                db.execSQL("ALTER TABLE course ADD COLUMN scheduleId INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_course_scheduleId ON course(scheduleId)")
+                db.execSQL("CREATE TABLE section_time_new (section INTEGER NOT NULL, startTime TEXT NOT NULL, endTime TEXT NOT NULL, scheduleId INTEGER NOT NULL, PRIMARY KEY(scheduleId, section))")
+                db.execSQL("INSERT INTO section_time_new SELECT section, startTime, endTime, 1 FROM section_time")
+                db.execSQL("DROP TABLE section_time")
+                db.execSQL("ALTER TABLE section_time_new RENAME TO section_time")
+            }
+        }
+
+        /** 历史考试均来自教务；保留 ID，避免升级改变提醒身份。 */
+        val MIGRATE_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exam ADD COLUMN source INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -88,7 +112,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "beike_schedule.db",
                 )
-                    .addMigrations(MIGRATE_1_2, MIGRATE_2_3, MIGRATE_3_4, MIGRATE_4_5)
+                    .addMigrations(MIGRATE_1_2, MIGRATE_2_3, MIGRATE_3_4, MIGRATE_4_5, MIGRATE_5_6, MIGRATE_6_7)
                     // 迁移失败的兜底保险丝。
                     //
                     // **只兜"找不到迁移路径"这一种情况**（Room 的 fallbackToDestructiveMigration
@@ -97,7 +121,7 @@ abstract class AppDatabase : RoomDatabase() {
                     // （"Migration didn't properly handle: ..."，例如字段类型不符、
                     // 历史版本写坏过表结构）都**不会**走这条兜底，仍是
                     // IllegalStateException → **启动即崩且无法自愈**，用户只能清应用数据。
-                    // 当前四条迁移与 3/4/5.json 逐列核对一致、迁移链完整，
+                    // 历史 schema 已版本化；新增迁移需导出 schema 并验证完整迁移链，
                     // 所以这里目前是"备用保险丝"，不要把它当成万能兜底。
                     //
                     // 注意也不兜「用户数据丢失」：迁移正常时数据完整保留，此声明不会被触发。

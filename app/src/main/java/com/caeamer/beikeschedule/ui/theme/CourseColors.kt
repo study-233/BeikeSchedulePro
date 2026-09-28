@@ -1,10 +1,12 @@
 package com.caeamer.beikeschedule.ui.theme
 
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 
 /** 课程块色板（参考 WakeUp：浅色底 + 同色深字）。按 colorIndex 取模循环。 */
 object CourseColors {
+    data class CardColors(val background: Color, val title: Color, val location: Color, val detail: Color)
     // (底色, 文字色) 对
     private val basePalette = listOf(
         Color(0xFFFCDFD6) to Color(0xFF8C3B2E), // 0 珊瑚粉
@@ -21,6 +23,46 @@ object CourseColors {
 
     private val userPalette = basePalette
 
+    private val cardPalettes by lazy {
+        listOf(false, true).flatMap { dark ->
+            listOf(false, true).map { active ->
+                (dark to active) to basePalette.indices.map { index ->
+                    val (base, foreground) = of(index, dark)
+                    val neutral = if (dark) Color(0xFF292D35) else Color(0xFFEEF0F4)
+                    val background = if (active) base else lerp(base, neutral, 0.55f)
+                    val ink = if (dark) Color.White else Color(0xFF20242B)
+                    val title = readable(lerp(foreground, ink, 0.22f), background, if (active) 7f else 5.5f)
+                    CardColors(background, title,
+                        readable(lerp(title, background, 0.12f), background, 5f),
+                        readable(lerp(title, background, 0.22f), background, 4.6f))
+                }
+            }
+        }.toMap()
+    }
+
+    /** 仅供应用课表使用：文字均不透明，小组件继续使用 of 的原有色板。 */
+    fun card(colorIndex: Int, dark: Boolean = false, active: Boolean = true): CardColors =
+        cardPalettes.getValue(dark to active)[Math.floorMod(colorIndex, basePalette.size)]
+
+    private fun contrast(a: Color, b: Color): Float {
+        val x = a.luminance()
+        val y = b.luminance()
+        return (maxOf(x, y) + 0.05f) / (minOf(x, y) + 0.05f)
+    }
+
+    /** 保留色相，必要时向对比度更高的黑/白端点校正；预计算后不在绘制期间迭代。 */
+    private fun readable(color: Color, background: Color, minimum: Float): Color {
+        if (contrast(color, background) >= minimum) return color
+        val end = if (contrast(Color.Black, background) > contrast(Color.White, background)) Color.Black else Color.White
+        var low = 0f
+        var high = 1f
+        repeat(16) {
+            val mid = (low + high) / 2
+            if (contrast(lerp(color, end, mid), background) >= minimum) high = mid else low = mid
+        }
+        return lerp(color, end, high)
+    }
+
     val defaultColorIndex: Int get() = 0
 
     /**
@@ -30,26 +72,11 @@ object CourseColors {
     fun importedOf(colorIndex: Int): Int =
         if (colorIndex in basePalette.indices) colorIndex else Math.floorMod(colorIndex, basePalette.size)
 
-    /** 返回 (底色, 文字色)。 */
-    fun of(colorIndex: Int): Pair<Color, Color> {
-        val c = userPalette[Math.floorMod(colorIndex, userPalette.size)]
-        // 渐变背景上，课程块用不透明浅色底以保证清晰；文字色不变
-        return c
+    /** 深色主题保留色相，降低卡片亮度；小组件沿用既有浅色色板。 */
+    fun of(colorIndex: Int, dark: Boolean = false): Pair<Color, Color> {
+        val (background, foreground) = userPalette[Math.floorMod(colorIndex, userPalette.size)]
+        return if (dark) androidx.compose.ui.graphics.lerp(Color(0xFF1D2026), background, 0.20f) to
+            androidx.compose.ui.graphics.lerp(background, Color.White, 0.18f)
+        else background to foreground
     }
-
-    /** 浅色模式渐变背景：顶部淡蓝紫 → 底部暖橙。 */
-    val scheduleGradient = Brush.verticalGradient(
-        0f to Color(0xFFE8E4F8),   // 顶部淡蓝紫
-        0.45f to Color(0xFFF3ECF7), // 中部淡紫
-        0.75f to Color(0xFFFBEBEE), // 下部暖粉
-        1f to Color(0xFFFCE8E2),   // 底部暖橙
-    )
-
-    /** 深色模式渐变背景：同色相的暗部，保持品牌感又不刺眼。 */
-    val scheduleGradientDark = Brush.verticalGradient(
-        0f to Color(0xFF191826),   // 顶部暗蓝紫
-        0.45f to Color(0xFF201A2B), // 中部暗紫
-        0.75f to Color(0xFF271A21), // 下部暗酒红
-        1f to Color(0xFF291D1B),   // 底部暗暖棕
-    )
 }

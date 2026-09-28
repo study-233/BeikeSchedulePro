@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -36,6 +36,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,8 +101,12 @@ fun FreeRoomScreen(viewModel: FreeRoomViewModel = viewModel()) {
 
     // 换楼栋后回到列表顶部：LazyColumn 的 key 是大节 ID（与楼栋无关），
     // 不重置的话用户会被留在上一个楼栋的滚动位置
+    var displayedBuilding by rememberSaveable { mutableStateOf(state.selectedBuildingId) }
     LaunchedEffect(state.selectedBuildingId) {
-        if (state.selectedBuildingId.isNotBlank()) listState.scrollToItem(0)
+        if (state.selectedBuildingId.isNotBlank()) {
+            if (displayedBuilding.isNotBlank() && displayedBuilding != state.selectedBuildingId) listState.scrollToItem(0)
+            displayedBuilding = state.selectedBuildingId
+        }
     }
 
     PullToRefreshBox(
@@ -168,7 +174,7 @@ private fun MetaLine(state: FreeRoomUiState, now: LocalDateTime, onRefresh: () -
             append(hmLabel(state.loadedAt))
             append(" 更新")
         }
-        append(" · 数据来自贝壳教学平台")
+
     }
     val nowMillis = now.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     val stale = state.loadedAt > 0L && nowMillis - state.loadedAt > STALE_MS
@@ -243,21 +249,26 @@ private fun SlotList(
     onToggle: (Int) -> Unit,
 ) {
     val expanded = state.effectiveExpandedIndex(now)
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        state = listState,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        // 用 itemsIndexed 而不是 items + slots.indexOf(slot)：RoomSlot 是 data class，
-        // indexOf 会逐个深度比较 rooms 列表；key 也要带上下标兜底（nodeId 可能为空）
-        itemsIndexed(state.slots, key = { index, slot -> slot.nodeId.ifBlank { "slot_$index" } }) { index, slot ->
-            SlotCard(
-                slot = slot,
-                phase = state.slotPhase(index, now),
-                expanded = index == expanded,
-                onToggle = { onToggle(index) },
-            )
+    var showPast by rememberSaveable(state.selectedBuildingId) { mutableStateOf(false) }
+    val allPast = state.allSlotsPast(now)
+    val ordered = state.orderedSlotIndices(now)
+    val active = ordered.filter { state.slotPhase(it, now) != SlotPhase.PAST }
+    val past = ordered.filter { state.slotPhase(it, now) == SlotPhase.PAST }
+    LazyColumn(Modifier.fillMaxSize(), state = listState,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(if (allPast) past else active, key = { "slot_${state.slots[it].nodeId}_$it" }) { index ->
+            SlotCard(state.slots[index], state.slotPhase(index, now), index == expanded, { onToggle(index) })
+        }
+        if (!allPast && past.isNotEmpty()) {
+            item(key = "past_toggle") {
+                TextButton(onClick = { showPast = !showPast }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(if (showPast) "收起已结束时段" else "已结束时段（${past.size}）")
+                }
+            }
+            if (showPast) items(past, key = { "slot_${state.slots[it].nodeId}_$it" }) { index ->
+                SlotCard(state.slots[index], SlotPhase.PAST, index == expanded, { onToggle(index) })
+            }
         }
     }
 }
@@ -273,9 +284,9 @@ private fun SlotCard(
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(com.caeamer.beikeschedule.ui.common.AppLayout.GroupShape)
             .background(
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (past) 0.3f else 0.55f),
+                MaterialTheme.colorScheme.surface.copy(alpha = if (past) 0.7f else 1f),
             ),
     ) {
         Row(
@@ -321,7 +332,7 @@ private fun SlotCard(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        if (expanded) {
+        androidx.compose.animation.AnimatedVisibility(visible = expanded) {
             Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp)) {
                 slot.rooms.forEach { RoomRow(it) }
             }

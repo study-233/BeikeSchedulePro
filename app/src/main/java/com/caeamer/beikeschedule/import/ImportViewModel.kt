@@ -12,7 +12,12 @@ import com.caeamer.beikeschedule.widget.WidgetUpdateCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.delay
+import com.caeamer.beikeschedule.model.ScheduleNames
+import com.caeamer.beikeschedule.reminder.ClassReminderScheduler
 import kotlinx.coroutines.launch
 
 /** 教务导入状态机。 */
@@ -56,7 +61,13 @@ sealed interface ImportUiState {
         val totalWeeks: Int,
         val courses: List<CourseEntity>,
         val sectionTimes: List<SectionTimeEntity>,
+        val targetId: Long? = null,
+        val createNew: Boolean = true,
+        val newName: String = "",
+        val nameInitialized: Boolean = false,
+        val saveError: String? = null,
     ) : ImportUiState {
+        fun semesterConfig() = SettingsStore.SemesterConfig(xn, xq, semesterName, firstMonday, totalWeeks, weekMondays)
         val scheduledCount get() = courses.count { !it.isUnscheduled }
         val unscheduledCount get() = courses.count { it.isUnscheduled }
     }
@@ -64,12 +75,41 @@ sealed interface ImportUiState {
     data class Error(val message: String) : ImportUiState
 }
 
-class ImportViewModel(app: Application) : AndroidViewModel(app) {
-
-    private val repo = ScheduleRepository(app)
+class ImportViewModel internal constructor(
+    app: Application,
+    private val repo: ScheduleRepository,
+    private val afterImport: suspend () -> Unit,
+) : AndroidViewModel(app) {
+    constructor(app: Application) : this(app, ScheduleRepository(app), {
+        WidgetUpdateCoordinator.requestRefresh(app)
+        ClassReminderScheduler.reschedule(app)
+    })
 
     private val _state = MutableStateFlow<ImportUiState>(ImportUiState.Browsing)
     val state: StateFlow<ImportUiState> = _state
+
+    val schedules = repo.schedules.retryWhen { cause, _ ->
+        if (cause is CancellationException) throw cause
+        delay(1500)
+        true
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun initializeName() {
+        val preview = _state.value as? ImportUiState.Preview ?: return
+        if (!preview.nameInitialized && schedules.value.isNotEmpty()) {
+            _state.value = preview.copy(newName = ScheduleNames.available(preview.semesterName, schedules.value.map { it.name }), nameInitialized = true)
+        }
+    }
+
+    fun selectTarget(createNew: Boolean, id: Long?) {
+        val preview = _state.value as? ImportUiState.Preview ?: return
+        _state.value = preview.copy(createNew = createNew, targetId = id, saveError = null)
+    }
+
+    fun setName(name: String) {
+        val preview = _state.value as? ImportUiState.Preview ?: return
+        _state.value = preview.copy(newName = name, nameInitialized = true, saveError = null)
+    }
 
     fun onFetchStart() {
         _state.value = ImportUiState.Fetching
@@ -152,46 +192,32 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * 确认导入：覆盖式写入课程与节次时间（含清除示例数据，单事务），再写学期配置。
-     *
-     * 三处之前的缺陷：
-     * 1. 课程写入与 clearSampleData 分属两个事务，中途被杀会留下"新课已写入、示例仍在"；
-     * 2. 整个流程没有 try/catch，任何异常（磁盘满、Room/DataStore IO 失败）都会逃出
-     *    viewModelScope.launch 直接崩进程，且流程不结束；
-     * 3. 状态在写库期间仍是 Preview，按钮不禁用 → 双击可并发跑两次导入。
-     *
-     * 现在：先置 [ImportUiState.Committing] 让按钮禁用并挡住重入，课程与学期配置各自
-     * 尽力写入，失败落到 Error、成功落到 [ImportUiState.Done]，由屏幕侧统一退出流程。
-     */
-    fun confirmImport() {
-        if (_state.value !is ImportUiState.Preview) return
-        val preview = _state.value as ImportUiState.Preview
+    /** 失败恢复完整预览及目标选择，提交事务不可拆成课表和 DataStore 两次写入。 */
+    fun confirmImport(allowDifferentSemester: Boolean = false) {
+        val preview = _state.value as? ImportUiState.Preview ?: return
+        if (!preview.createNew && preview.targetId == null) return
         _state.value = ImportUiState.Committing
         viewModelScope.launch {
             try {
-                // 先写课程（单事务，含清除示例）；失败则学期配置不动，避免"新课配旧学期"
-                repo.commitImport(preview.courses, preview.sectionTimes)
-                val previous = repo.settings.semester.first()
-                repo.settings.saveSemester(
-                    previous.copy(
-                        xn = preview.xn,
-                        xq = preview.xq,
-                        name = preview.semesterName,
-                        firstMonday = preview.firstMonday,
-                        totalWeeks = preview.totalWeeks,
-                        weekMondays = preview.weekMondays,
-                    )
+                repo.commitImport(
+                    if (preview.createNew) null else preview.targetId,
+                    preview.newName, preview.semesterConfig(), preview.courses, preview.sectionTimes,
+                    allowDifferentSemester,
                 )
-                _state.value = ImportUiState.Done
-                WidgetUpdateCoordinator.requestRefresh(getApplication())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // 课程可能已写入、学期配置未写入：明确告诉用户发生了什么，而不是静默
-                _state.value = ImportUiState.Error(
-                    "保存失败：${e.message ?: e.javaClass.simpleName}。请重试；若反复失败，请重新抓取后再导入。",
-                )
+                _state.value = preview.copy(saveError = e.message ?: "保存失败，请重试")
+                return@launch
+            }
+            // 数据已经提交；外部刷新失败不能把成功导入变成可重复提交的预览。
+            try {
+                afterImport()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                // 打开应用及每日脉冲会重新尝试排期。
+            } finally {
+                _state.value = ImportUiState.Done
             }
         }
     }

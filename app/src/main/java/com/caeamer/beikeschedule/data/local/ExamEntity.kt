@@ -1,10 +1,11 @@
 package com.caeamer.beikeschedule.data.local
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 
 /**
- * 个人考试安排（来自 /kscxtj/queryXsksByxhList，覆盖式全量刷新，仅当前学期）。
+ * 个人考试安排（教务导入或手动录入；教务刷新仅覆盖导入记录）。
  * 字段来自列定义 JS（docs/samples/XskscxByXhColumn.js）；时间从 KSSJMS 描述解析，解析失败留空。
  */
 @Entity(tableName = "exam")
@@ -22,7 +23,14 @@ data class ExamEntity(
     val jkjsbz: String,    // 进考场标志/备注
     val kkyxmc: String,    // 开课学院
     val xnxq: String,      // 学期代码（冗余，便于覆盖刷新与过滤）
+    @ColumnInfo(defaultValue = "0") val source: Int = SOURCE_IMPORT,
 ) {
+    companion object {
+        const val SOURCE_IMPORT = 0
+        const val SOURCE_MANUAL = 1
+    }
+
+    val isManual: Boolean get() = source == SOURCE_MANUAL
     /** 考试是否已有可用的日期（用于排期与倒计时）。 */
     val hasDate: Boolean get() = ksrq.isNotBlank()
 }

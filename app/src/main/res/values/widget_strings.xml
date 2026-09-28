@@ -1,6 +1,13 @@
 <resources>
     <string name="widget_name">今日课表</string>
     <string name="widget_description">查看正在上和接下来的课程，点按打开课表</string>
+    <string name="widget_add_title">添加桌面小组件</string>
+    <string name="widget_add_summary">在桌面查看今日课程</string>
+    <string name="widget_add_requested">已向桌面发出添加请求，请在系统界面确认</string>
+    <string name="widget_add_help">没有弹出？查看手动添加方法</string>
+    <string name="widget_add_manual_help">如果桌面没有弹出添加界面，请长按桌面空白处，进入小组件列表，找到「贝壳课表」中的「今日课表」并添加。</string>
+    <string name="widget_add_manual_instructions">无法快捷添加，请长按桌面空白处，进入小组件列表，找到「贝壳课表」中的「今日课表」并添加。</string>
+    <string name="widget_add_dismiss">知道了</string>
     <string name="widget_title">我的课表</string>
     <string name="widget_loading">正在读取课表…</string>
     <string name="widget_load_failed">课表暂时无法读取</string>

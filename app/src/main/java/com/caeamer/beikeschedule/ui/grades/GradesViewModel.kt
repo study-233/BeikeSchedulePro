@@ -14,13 +14,16 @@ import com.caeamer.beikeschedule.data.repo.WeightedScoreCalculator
 import com.caeamer.beikeschedule.import.parser.CreditProgressParser
 import com.caeamer.beikeschedule.import.parser.CreditProgressParser.CreditCategory
 import com.caeamer.beikeschedule.import.parser.CreditProgressParser.GraduationProgress
-import com.caeamer.beikeschedule.import.parser.ExamsParser
 import com.caeamer.beikeschedule.import.parser.GradesParser
 import com.caeamer.beikeschedule.import.parser.GpaInfo
-import com.caeamer.beikeschedule.import.parser.JwParser
+import com.caeamer.beikeschedule.model.CampusSection
+import com.caeamer.beikeschedule.model.ExamDraft
 import com.caeamer.beikeschedule.reminder.ExamReminderScheduler
-import com.caeamer.beikeschedule.reminder.TodoReminderScheduler
+import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -28,8 +31,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.distinctUntilChangedBy
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -37,25 +38,18 @@ import kotlinx.coroutines.launch
 /** 成绩展示模式：加权（默认，只看必修数字成绩）/ GPA（教务官方值）。 */
 enum class ScoreMode { WEIGHTED, GPA }
 
-/**
- * 教务 Tab 的分段。
- *
- * 顺序即界面顺序，`ordinal` 直接用于持久化：**0=无课教室（默认）**、1=日程、2=成绩、3=考试。
- * 用户明确要求"默认打开教务是无课教室"——成绩使用率不高，放第一位会让人每次都要切。
- *
- * 注意：枚举顺序即持久化序号。本次在成绩前插入"日程"，老用户存的旧序号（1=成绩/2=考试）
- * 升级后会一次性落到相邻分段，之后正常；因分段是低频偏好且立刻可改回，不做序号映射迁移。
- */
-enum class GradesSection { FREE_ROOM, TODO, SCORES, EXAMS }
-
 /** 学分进度行：类别要求（接口）+ 本地已完成（成绩汇总）。 */
 data class CreditRow(val category: CreditCategory, val completed: Double)
 
+data class ExamEditorState(
+    val draft: ExamDraft? = null,
+    val saving: Boolean = false,
+    val error: String? = null,
+)
+
 data class GradesUiState(
-    val showWebView: Boolean = false,
-    val fetching: Boolean = false,
     /** null = 分段偏好还没从 DataStore 读到（冷启动最初几帧），此时不渲染任何分段页。 */
-    val section: GradesSection? = null,
+    val section: CampusSection? = null,
     val grades: List<GradeEntity> = emptyList(),
     val exams: List<ExamEntity> = emptyList(),
     val gpa: GpaInfo? = null,
@@ -97,7 +91,7 @@ data class GradesUiState(
 
     /** 按学期分组（学期名倒序，学期内按原始顺序）。 */
     val grouped: List<Pair<String, List<GradeEntity>>> by lazy(LazyThreadSafetyMode.NONE) {
-        grades.groupBy { it.xnxqmc }.toSortedMap(compareByDescending { it }).map { (k, v) -> k to v }
+        grades.filter { matchesFilter(it) }.groupBy { it.xnxqmc }.toSortedMap(compareByDescending { it }).map { (k, v) -> k to v }
     }
 
     /**
@@ -220,26 +214,116 @@ data class GradesUiState(
     }
 }
 
-class GradesViewModel(app: Application) : AndroidViewModel(app) {
+class GradesViewModel internal constructor(
+    app: Application,
+    private val savedState: SavedStateHandle,
+    private val repo: ScheduleRepository,
+    private val rescheduleExams: suspend (Set<Long>) -> Unit,
+) : AndroidViewModel(app) {
 
-    private val repo = ScheduleRepository(app)
-    private val showWebView = MutableStateFlow(false)
-    private val fetching = MutableStateFlow(false)
-    private val gpaFromCache = MutableStateFlow<GpaInfo?>(null)
-    private val error = MutableStateFlow<String?>(null)
-    private val scoreMode = MutableStateFlow(ScoreMode.WEIGHTED)
-    private val semesterFilter = MutableStateFlow("")
-    private val schoolYearFilter = MutableStateFlow("")
-    private val excludedKcdm = MutableStateFlow<Set<String>>(emptySet())
+    constructor(app: Application, savedState: SavedStateHandle) : this(
+        app, savedState, ScheduleRepository(app),
+        { ids -> ExamReminderScheduler.reschedule(app, changedExamIds = ids) },
+    )
 
-    /**
-     * 当前分段：从 DataStore 读取（"记住上次选择"），默认无课教室。
-     * 用 ordinal 存整数，枚举顺序变化时旧值会落到相邻分段——因为这三个分段
-     * 顺序是产品决定且短期不会变，用字符串名反而更脆（改类名就丢偏好）。
-     */
-    private val section: Flow<GradesSection> = repo.settings.gradesTabIndex.map { index ->
-        GradesSection.entries.getOrElse(index) { GradesSection.FREE_ROOM }
+    private val _examEditor = MutableStateFlow(ExamEditorState(
+        draft = savedState.get<ArrayList<String>>("examDraft")?.let { ExamDraft.restore(it) }))
+    val examEditor: StateFlow<ExamEditorState> = _examEditor.asStateFlow()
+    private val _examMessage = MutableStateFlow<String?>(null)
+    val examMessage: StateFlow<String?> = _examMessage.asStateFlow()
+    private val _examReminderRetry = MutableStateFlow(false)
+    val examReminderRetry: StateFlow<Boolean> = _examReminderRetry.asStateFlow()
+    private var pendingExamReminderIds = emptySet<Long>()
+
+    private fun setExamEditor(state: ExamEditorState) {
+        savedState["examDraft"] = state.draft?.savedFields()
+        _examEditor.value = state
     }
+
+    fun openExamEditor(exam: ExamEntity? = null) {
+        if (_examEditor.value.saving || exam?.isManual == false) return
+        setExamEditor(ExamEditorState(exam?.let { ExamDraft.from(it) } ?: ExamDraft()))
+    }
+
+    fun updateExamDraft(draft: ExamDraft) {
+        val current = _examEditor.value
+        if (!current.saving && current.draft?.id == draft.id) setExamEditor(current.copy(draft = draft, error = null))
+    }
+
+    fun closeExamEditor() {
+        if (!_examEditor.value.saving) setExamEditor(ExamEditorState())
+    }
+
+    fun dismissExamMessage() { _examMessage.value = null }
+    fun saveExam() { commitExam(delete = false) }
+    fun deleteExam() { commitExam(delete = true) }
+
+    private fun commitExam(delete: Boolean) {
+        val current = _examEditor.value
+        val draft = current.draft ?: return
+        if (current.saving || (delete && draft.id == 0L)) return
+        if (!delete) draft.validationError()?.let {
+            setExamEditor(current.copy(error = it))
+            return
+        }
+        // 在 launch 前设置，连续点击也只提交一次。
+        setExamEditor(current.copy(saving = true, error = null))
+        viewModelScope.launch {
+            // 一旦用户确认，数据库提交和提醒收尾不因离开页面而中断。
+            withContext(NonCancellable) {
+                try {
+                    if (delete) repo.deleteManualExam(draft.id) else repo.saveManualExam(draft)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    setExamEditor(current.copy(error = if (delete) "删除失败，请重试" else "保存失败，请重试"))
+                    return@withContext
+                }
+                // 已写入后清除草稿，提醒失败不能让用户再次提交同一条新增记录。
+                setExamEditor(ExamEditorState(saving = true))
+                val resultText = if (delete) "考试已删除" else "考试已保存"
+                if (draft.id != 0L) pendingExamReminderIds = pendingExamReminderIds + draft.id
+                try { updateExamReminders(resultText) } finally {
+                    setExamEditor(ExamEditorState())
+                }
+            }
+        }
+    }
+
+    /** 提醒失败只重试调度，不重复新增或删除数据库记录。 */
+    fun retryExamReminders() {
+        val current = _examEditor.value
+        if (current.saving) return
+        setExamEditor(current.copy(saving = true))
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                try { updateExamReminders("考试提醒已更新") } finally {
+                    setExamEditor(current)
+                }
+            }
+        }
+    }
+
+    private suspend fun updateExamReminders(successMessage: String) {
+        try {
+            rescheduleExams(pendingExamReminderIds)
+            pendingExamReminderIds = emptySet()
+            _examReminderRetry.value = false
+            _examMessage.value = successMessage
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            _examReminderRetry.value = true
+            _examMessage.value = "考试数据已保存，但提醒更新失败，可重试提醒"
+        }
+    }
+
+    private val gpaFromCache = repo.settings.gpaCache.distinctUntilChanged().map(GradesParser::parseGpa)
+    private val error = MutableStateFlow<String?>(null)
+    private val scoreMode = MutableStateFlow(ScoreMode.entries.firstOrNull { it.name == savedState.get<String>("scoreMode") } ?: ScoreMode.WEIGHTED)
+    private val semesterFilter = MutableStateFlow(savedState.get<String>("semesterFilter") ?: "")
+    private val schoolYearFilter = MutableStateFlow(savedState.get<String>("schoolYearFilter") ?: "")
+    private val excludedKcdm = MutableStateFlow(savedState.get<ArrayList<String>>("excludedCourses")?.toSet() ?: emptySet())
+
+    private val section: Flow<CampusSection> = repo.settings.campusSection
 
     /** 会被 combine 合并的本地 UI 偏好（gpa 必须在流内，否则刷新后有 GPA 不刷新的竞态）。 */
     private data class UiPrefs(
@@ -253,9 +337,7 @@ class GradesViewModel(app: Application) : AndroidViewModel(app) {
 
     private data class FetchInfo(
         val fetchedAt: Long,
-        val showWebView: Boolean,
-        val fetching: Boolean,
-        val section: GradesSection,
+        val section: CampusSection,
         val hideScores: Boolean,
     )
 
@@ -278,17 +360,14 @@ class GradesViewModel(app: Application) : AndroidViewModel(app) {
         repo.exams,
         creditParsed,
         combine(
-            repo.settings.gradesFetchedAt, showWebView, fetching, section,
-            ScorePrivacy.hidden,
-        ) { a, b, c, d, e -> FetchInfo(a, b, c, d, e) },
+            repo.settings.gradesFetchedAt, section, ScorePrivacy.hidden,
+        ) { a, b, c -> FetchInfo(a, b, c) },
         combine(
             gpaFromCache, error, scoreMode, semesterFilter,
             combine(schoolYearFilter, excludedKcdm) { y, x -> y to x },
         ) { g, e, m, f, (y, x) -> UiPrefs(g, e, m, f, y, x) },
     ) { grades, exams, credit, info, prefs ->
         GradesUiState(
-            showWebView = info.showWebView,
-            fetching = info.fetching,
             section = info.section,
             grades = grades,
             exams = exams,
@@ -310,146 +389,25 @@ class GradesViewModel(app: Application) : AndroidViewModel(app) {
         // 成绩/考试等其余部分照常显示。
         .catch { e ->
             if (e is CancellationException) throw e
-            emit(GradesUiState(section = GradesSection.FREE_ROOM))
+            emit(GradesUiState(section = CampusSection.FREE_ROOM))
         }
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5000),
-            // 初值必须与偏好的默认段一致（无课教室）：否则冷启动进教务的最前面几帧
-            // 会按"成绩段 + 无数据"渲染一屏"还没有成绩数据"，然后才跳回无课教室
-            GradesUiState(section = GradesSection.FREE_ROOM),
+            // 未读到偏好前不组合任何栏目，避免错误首帧与空教室的多余请求。
+            GradesUiState(),
         )
 
-    init {
-        viewModelScope.launch {
-            gpaFromCache.value = parseCachedGpa()
-            // 从未抓取过 → 进入即走抓取流程
-            if (repo.grades.first().isEmpty() && repo.settings.gradesFetchedAt.first() == 0L) {
-                showWebView.value = true
-            }
-        }
-        // todo 表任何变更（新增/编辑/删除/打卡）→ 全量重排日程提醒。
-        // 与上课提醒同理按值去重：reschedule 内部会把已排 requestCode 写回 DataStore(TODO_REMINDER_CODES)，
-        // 而本收集器源自同一 dataStore.data，不去重会形成「重排→写 codes→重发→重排」自激循环。
-        viewModelScope.launch {
-            repo.todos.distinctUntilChangedBy { it }
-                .collect {
-                    // 重排失败只允许"本轮不重排"：异常逃出 viewModelScope 会直接崩进程，
-                    // 而这里由 Room 流驱动，坏数据会变成"每次改日程都崩"。
-                    runCatching { TodoReminderScheduler.reschedule(getApplication()) }
-                        .onFailure { e -> if (e is CancellationException) throw e }
-                }
-        }
-    }
-
-    private suspend fun parseCachedGpa(): GpaInfo? =
-        GradesParser.parseGpa(repo.settings.gpaCache.first())
-
-    fun onFetchStart() {
-        fetching.value = true
-        error.value = null
-    }
-
-    /**
-     * 页面开始加载时调用：把卡住的抓取态复位。
-     * 脚本可能因重入标志直接 return、或在桥不可用的页面上静默失败，
-     * 桥回调不会再来——不复位就会一直显示"抓取中"的进度条。
-     */
-    fun onPageStarted() {
-        fetching.value = false
-    }
-
-    /** GradesBridge 回调：成绩+GPA+学籍+当前学期+考试+学业进度，一次会话全量。 */
-    fun onFetchResult(
-        gpaJson: String,
-        gradesJson: String,
-        userJson: String,
-        xsxxJson: String,
-        semJson: String,
-        examsJson: String,
-        xflbyqJson: String,
-        bxkqkJson: String,
-    ) {
-        viewModelScope.launch {
-            try {
-                val grades = GradesParser.parseGrades(gradesJson)
-                if (grades.isNotEmpty()) {
-                    repo.replaceGrades(grades)
-                    repo.settings.saveGradesMeta(gpaJson, System.currentTimeMillis())
-                    gpaFromCache.value = GradesParser.parseGpa(gpaJson)
-                }
-                // 成绩为空是合法的（新生/评教未完成）：只影响"成绩表"这一件事，
-                // 不能因此丢掉同一次已抓成功的考试、学籍与学业进度。
-                // 错误文案在末尾统一汇总（见 buildList）。
-                // 以下四项与成绩无关，各自独立判定（此前全被 else 包住，
-                // 大一新生第一学期永远看不到考试安排、学籍信息与学业进度）。
-                // 学籍快照顺手存（"我的"页离线展示）
-                GradesParser.parseStudentProfile(userJson, xsxxJson)?.let {
-                    repo.settings.saveStudentProfile(it)
-                }
-                // 考试安排（仅当前学期）。
-                // **不能无条件覆盖**：jw_grades.js 对考试子请求失败会返回空串，
-                // 而 parseExams("") 得到空列表，replaceExams 是 clear + insertAll ——
-                // 一次子请求失败就会静默清空已有考试安排与考前提醒。
-                val (semXn, semXq, _) = JwParser.parseCurrentSemester(semJson)
-                val examsFromServer = examsJson.isNotBlank()
-                val exams = ExamsParser.parseExams(examsJson, semXn + semXq)
-                if (examsFromServer) repo.replaceExams(exams)
-                // 学业进度缓存
-                if (xflbyqJson.isNotBlank() || bxkqkJson.isNotBlank()) {
-                    repo.settings.saveCreditMeta(xflbyqJson, bxkqkJson)
-                }
-                // 考试请求成功时无论如何都重排（空列表 = 取消未来的考试提醒，用于学期结束等场景）；
-                // 请求失败时**不动**闹钟，否则会把仍然有效的考试提醒一并取消。
-                if (examsFromServer) ExamReminderScheduler.reschedule(getApplication())
-                error.value = buildList {
-                    if (grades.isEmpty()) add("未解析到成绩，请确认已在教务系统完成评教/成绩发布后重试")
-                    if (!examsFromServer) add("考试安排获取失败，已保留上次数据")
-                }.joinToString("；").ifEmpty { null }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error.value = "解析失败：${e.message}"
-            } finally {
-                fetching.value = false
-                showWebView.value = false
-            }
-        }
-    }
-
-    fun onFetchError(message: String) {
-        fetching.value = false
-        showWebView.value = false
-        error.value = "抓取失败：$message"
-    }
-
-    /**
-     * 开始一次成绩抓取。
-     *
-     * 必须同时把分段切到成绩：抓取用的 WebView 只属于成绩/考试段，
-     * 停在无课教室段时 `showWebView = true` 不会有任何可见效果
-     * （WebView 不组合、脚本不注入、请求根本不会发出），
-     * 用户却会看到确认框说"将进入教务系统重新抓取"。
-     */
-    fun startRefresh() {
-        error.value = null
-        showWebView.value = true
-        viewModelScope.launch { repo.settings.setGradesTabIndex(GradesSection.SCORES.ordinal) }
-    }
-
-    /** 放弃本次抓取（退出全屏登录页），回到分段内容。 */
-    fun cancelFetch() {
-        showWebView.value = false
-        fetching.value = false
-    }
+    /** “我的”入口只调整显示栏目，抓取请求由 Activity 共享状态管理。 */
+    fun openAcademicData() { setSection(CampusSection.SCORES) }
 
     fun dismissError() {
         error.value = null
     }
 
     /** 切换分段并记住（跨重启保留）。 */
-    fun setSection(section: GradesSection) {
-        viewModelScope.launch { repo.settings.setGradesTabIndex(section.ordinal) }
+    fun setSection(section: CampusSection) {
+        viewModelScope.launch { repo.settings.setCampusSection(section) }
     }
 
     /** 成绩隐私开关：点击小眼睛切换显示/隐藏（会话级，退到后台自动复位隐藏）。 */
@@ -458,15 +416,20 @@ class GradesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setScoreMode(mode: ScoreMode) {
+        savedState["scoreMode"] = mode.name
         scoreMode.value = mode
     }
 
     fun setSemesterFilter(semester: String) {
+        savedState["semesterFilter"] = semester
+        savedState["schoolYearFilter"] = ""
         semesterFilter.value = semester
         schoolYearFilter.value = ""
     }
 
     fun setSchoolYearFilter(schoolYear: String) {
+        savedState["schoolYearFilter"] = schoolYear
+        savedState["semesterFilter"] = ""
         schoolYearFilter.value = schoolYear
         semesterFilter.value = ""
     }
@@ -475,5 +438,6 @@ class GradesViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleExcluded(kcdm: String) {
         excludedKcdm.value = if (kcdm in excludedKcdm.value) excludedKcdm.value - kcdm
         else excludedKcdm.value + kcdm
+        savedState["excludedCourses"] = ArrayList(excludedKcdm.value)
     }
 }

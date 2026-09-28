@@ -51,6 +51,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <!--
                     时间口径变化后必须重排：闹钟按 epoch 毫秒排、计划按本地时间算，
                     跨时区或手动改时间会让已排的提醒整体错点。
