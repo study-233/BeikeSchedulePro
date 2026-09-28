@@ -188,7 +188,7 @@ internal fun CourseDetailOverlay(course: CourseEntity, sourceKey: String, source
                     .width(with(density) { rect.width.toDp() }).height(with(density) { rect.height.toDp() })
                     .alpha(1f - progress.value),
                 shape = RoundedCornerShape((6 + 14 * progress.value).dp), color = cardColor,
-            ) { CourseCardText(if (occurrence?.isMakeup == true) course.copy(name = "补课 · ${course.name}") else course,
+            ) { CourseCardText(course,
                 cardColors.title, fontScale, cardColors.location, cardColors.detail) }
         }
     }

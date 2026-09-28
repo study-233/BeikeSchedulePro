@@ -40,8 +40,6 @@ data class ScheduleUiState(
     val currentWeek: Int? = null,
     /** 今天是否处于被跳过的假期周（如国庆）；此时 currentWeek 指向假期后第一个教学周。 */
     val inHoliday: Boolean = false,
-    /** 假期提示：假期后第一个教学周的周一日期。 */
-    val nextWeekMonday: String? = null,
     /** 开学前（显示语义仍视为第 1 周，但状态文案应显示"未开学"）。 */
     val beforeStart: Boolean = false,
     /** 学期已结束（currentWeek=null）。 */
@@ -172,7 +170,7 @@ class ScheduleViewModel(app: Application) : AndroidViewModel(app) {
             scheduleId = data.scheduleId, scheduleName = data.scheduleName, scheduleVersion = data.reminderVersion,
             courses = data.courses, sectionTimes = data.sectionTimes, semester = semester,
             selectedWeek = pages[resolved].teachingWeek ?: 0, currentWeek = location.week,
-            inHoliday = location.isHoliday, nextWeekMonday = location.nextWeekMonday,
+            inHoliday = location.isHoliday,
             beforeStart = location.beforeStart, afterEnd = location.afterEnd, loaded = true,
             adjustments = data.adjustments, adjustmentError = DateCourseResolver.applicable(semester, data.adjustments).error,
             pages = pages, selectedPage = resolved, currentPage = currentPage,

@@ -311,16 +311,6 @@ fun ScheduleScreen(
                         days = visibleDays,
                     )
                 }
-                if (state.inHoliday && state.nextWeekMonday != null && !pageInfo.contains(now.toLocalDate())) {
-                    Surface(color = MaterialTheme.colorScheme.tertiaryContainer) {
-                        Text(
-                            "假期中 · ${state.nextWeekMonday} 进入第${state.currentWeek}周",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                    }
-                }
                 state.adjustmentError?.let { Text(it, Modifier.padding(horizontal = 12.dp),
                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 HorizontalPager(
@@ -482,7 +472,10 @@ private fun DateRow(page: ScheduleWeekPage, semester: SettingsStore.SemesterConf
                             else -> Color.Transparent
                         },
                         RoundedCornerShape(10.dp),
-                    ).padding(horizontal = 8.dp, vertical = 2.dp),
+                    ).padding(horizontal = 8.dp, vertical = 2.dp)
+                        .then(if (isMakeup) Modifier.semantics(mergeDescendants = true) {
+                            stateDescription = "调休补课"
+                        } else Modifier),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
@@ -499,8 +492,6 @@ private fun DateRow(page: ScheduleWeekPage, semester: SettingsStore.SemesterConf
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    if (isMakeup) Text("补课", fontSize = 9.sp,
-                        color = if (isToday) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onTertiaryContainer)
                 }
             }
         }
@@ -555,10 +546,10 @@ private fun WeekGrid(
         // weight 列分配存在 1px 舍入，取较窄列宽测量，确保任何列都不会少算行数。
         val dayWidthPx = (constraints.maxWidth - with(density) { SECTION_COL_WIDTH.roundToPx() }) / days.size
         val outerGapPx = with(density) { CourseCardLayout.OUTER_GAP.dp.roundToPx() } * 2
-        val minimumUnit = remember(dayLayouts, makeupIds, dayWidthPx, outerGapPx, cardMeasurer) {
+        val minimumUnit = remember(dayLayouts, dayWidthPx, outerGapPx, cardMeasurer) {
             val measurements = dayLayouts.values.flatMap { day ->
                 day.clusters.flatMap { cluster ->
-                    cluster.map { cardMeasurer.measure(if (it.id in makeupIds[it.dayOfWeek].orEmpty()) it.copy(name = "补课 · ${it.name}") else it,
+                    cluster.map { cardMeasurer.measure(it,
                         (dayWidthPx / cluster.size - outerGapPx).coerceAtLeast(1)) }
                 } + day.inactives.map { cardMeasurer.measure(it, (dayWidthPx - outerGapPx).coerceAtLeast(1)) }
             }
@@ -735,7 +726,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CourseCard(
                 }
                 .clickable(interactionSource = interaction, indication = null, onClick = onClick),
         ) {
-            CourseCardText(if (isMakeup) course.copy(name = "补课 · ${course.name}") else course,
+            CourseCardText(course,
                 colors.title, fontScale, colors.location, colors.detail)
         }
         // 蓝点放在上边缘，不再为整段标题预留 15dp；“下一节课”由卡片语义播报。
